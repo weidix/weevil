@@ -1,1 +1,1 @@
-# media-info-scraper-kit
+# media-info-scraper

@@ -3,5 +3,5 @@
 version = 4
 
 [[package]]
-name = "media-info-scraper-kit"
+name = "media-info-scraper"
 version = "0.1.0"
