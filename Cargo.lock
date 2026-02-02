@@ -3,5 +3,5 @@
 version = 4
 
 [[package]]
-name = "media-info-scraper"
+name = "weevil"
 version = "0.1.0"
