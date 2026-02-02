@@ -1,0 +1,9 @@
+[package]
+name = "weevil-core"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+html5ever = "0.38"
+selectors = "0.35"
+xee-xpath-ast = "0.1"

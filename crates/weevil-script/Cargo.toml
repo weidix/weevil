@@ -1,0 +1,8 @@
+[package]
+name = "weevil-script"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+weevil-core = { path = "../weevil-core" }
+

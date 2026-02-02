@@ -1,0 +1,11 @@
+[package]
+name = "weevil-app"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+weevil-script = { path = "../weevil-script" }
+
+[[bin]]
+name = "weevil"
+path = "src/main.rs"
