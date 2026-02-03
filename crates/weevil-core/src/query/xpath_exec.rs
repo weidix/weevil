@@ -305,3 +305,83 @@ fn predicate_index(predicate: &ast::ExprS) -> Result<Option<usize>, QueryExecErr
         .map_err(|_| QueryExecError::Unsupported("xpath predicate index is out of range"))?;
     Ok(Some(index))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::html::HtmlTree;
+    use crate::xpath::XPath;
+
+    fn sample_tree() -> HtmlTree {
+        let html = r#"
+        <html>
+          <body>
+            <div id="outer">
+              <span id="first"></span>
+              text
+              <span id="second"></span>
+              <em id="third"></em>
+            </div>
+          </body>
+        </html>
+        "#;
+        HtmlTree::parse(html)
+    }
+
+    #[test]
+    fn find_xpath_handles_axes_and_predicates() {
+        let tree = sample_tree();
+        let first = tree.index().by_id("first").expect("missing first");
+        let second = tree.index().by_id("second").expect("missing second");
+        let third = tree.index().by_id("third").expect("missing third");
+        let outer = tree.index().by_id("outer").expect("missing outer");
+
+        let xpath = XPath::parse("//span[1]").unwrap();
+        let matches = find_xpath(&xpath, &tree).unwrap();
+        assert_eq!(matches, vec![first]);
+
+        let xpath = XPath::parse("//span/following-sibling::span").unwrap();
+        let matches = find_xpath(&xpath, &tree).unwrap();
+        assert_eq!(matches, vec![second]);
+
+        let xpath = XPath::parse("//span/preceding-sibling::span").unwrap();
+        let matches = find_xpath(&xpath, &tree).unwrap();
+        assert_eq!(matches, vec![first]);
+
+        let xpath = XPath::parse("//em/ancestor::div").unwrap();
+        let matches = find_xpath(&xpath, &tree).unwrap();
+        assert_eq!(matches, vec![outer]);
+
+        let xpath = XPath::parse("//em/parent::div").unwrap();
+        let matches = find_xpath(&xpath, &tree).unwrap();
+        assert_eq!(matches, vec![outer]);
+
+        let xpath = XPath::parse("//em/self::em").unwrap();
+        let matches = find_xpath(&xpath, &tree).unwrap();
+        assert_eq!(matches, vec![third]);
+
+        let xpath = XPath::parse("//div/descendant::em").unwrap();
+        let matches = find_xpath(&xpath, &tree).unwrap();
+        assert_eq!(matches, vec![third]);
+    }
+
+    #[test]
+    fn find_xpath_rejects_unsupported_axis() {
+        let tree = sample_tree();
+        let xpath = XPath::parse("//span/attribute::id").unwrap();
+        let err = find_xpath(&xpath, &tree).unwrap_err();
+        match err {
+            QueryExecError::Unsupported(message) => {
+                assert!(message.contains("attribute axis"));
+            }
+        }
+    }
+
+    #[test]
+    fn find_xpath_zero_predicate_is_empty() {
+        let tree = sample_tree();
+        let xpath = XPath::parse("//span[0]").unwrap();
+        let matches = find_xpath(&xpath, &tree).unwrap();
+        assert!(matches.is_empty());
+    }
+}

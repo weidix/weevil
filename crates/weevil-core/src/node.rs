@@ -132,3 +132,67 @@ pub(crate) fn normalize_tag_name(name: &str) -> Cow<'_, str> {
         Cow::Borrowed(name)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use html5ever::{Attribute, LocalName, QualName, local_name, ns};
+
+    fn make_attr(name: &str, value: &str) -> Attribute {
+        Attribute {
+            name: QualName::new(None, ns!(), LocalName::from(name)),
+            value: value.into(),
+        }
+    }
+
+    #[test]
+    fn node_id_round_trip() {
+        let id = NodeId::new(42);
+        assert_eq!(id.index(), 42);
+    }
+
+    #[cfg(target_pointer_width = "64")]
+    #[test]
+    #[should_panic(expected = "html tree exceeds u32::MAX nodes")]
+    fn node_id_panics_on_overflow() {
+        let _ = NodeId::new(u32::MAX as usize + 1);
+    }
+
+    #[test]
+    fn node_kind_as_element() {
+        let data = ElementData {
+            name: QualName::new(None, ns!(html), local_name!("div")),
+            attrs: Vec::new(),
+            template_contents: None,
+            mathml_annotation_xml_integration_point: false,
+        };
+        let element_kind = NodeKind::Element(data);
+        assert!(element_kind.as_element().is_some());
+
+        let text_kind = NodeKind::Text(StrTendril::from("hi"));
+        assert!(text_kind.as_element().is_none());
+    }
+
+    #[test]
+    fn element_attr_value_normalizes_name() {
+        let data = ElementData {
+            name: QualName::new(None, ns!(html), local_name!("div")),
+            attrs: vec![make_attr("id", "Hero"), make_attr("class", "a b")],
+            template_contents: None,
+            mathml_annotation_xml_integration_point: false,
+        };
+
+        assert_eq!(data.attr_value("ID"), Some("Hero"));
+        assert_eq!(data.attr_value("class"), Some("a b"));
+        assert_eq!(data.attr_value("missing"), None);
+    }
+
+    #[test]
+    fn normalize_tag_name_tracks_case() {
+        let lower = normalize_tag_name("div");
+        assert!(matches!(lower, Cow::Borrowed("div")));
+
+        let mixed = normalize_tag_name("DiV");
+        assert!(matches!(mixed, Cow::Owned(ref val) if val == "div"));
+    }
+}

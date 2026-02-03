@@ -251,3 +251,62 @@ pub(crate) fn find_css(selector: &Selector, tree: &HtmlTree) -> Vec<NodeId> {
     });
     matches
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use selectors::Element;
+
+    fn sample_tree() -> HtmlTree {
+        let html = r#"
+        <!doctype html>
+        <html>
+          <body>
+            <div id="root" data-role="main" class="wrap">
+              <span id="first"></span>
+              text
+              <span id="second" class="hit"></span>
+              <!-- comment -->
+            </div>
+            <p class="hit"></p>
+          </body>
+        </html>
+        "#;
+        HtmlTree::parse(html)
+    }
+
+    #[test]
+    fn element_navigation_skips_non_elements() {
+        let tree = sample_tree();
+        let first = tree.index().by_id("first").expect("missing first");
+        let second = tree.index().by_id("second").expect("missing second");
+        let root_div = tree.index().by_id("root").expect("missing root");
+        let html_id = tree.root_element().expect("missing html");
+
+        let first_el = HtmlElement::new(&tree, first);
+        let second_el = HtmlElement::new(&tree, second);
+        let root_el = HtmlElement::new(&tree, root_div);
+        let html_el = HtmlElement::new(&tree, html_id);
+
+        assert_eq!(first_el.next_sibling_element().unwrap().id, second);
+        assert_eq!(second_el.prev_sibling_element().unwrap().id, first);
+        assert_eq!(root_el.first_element_child().unwrap().id, first);
+        assert_eq!(second_el.parent_element().unwrap().id, root_div);
+        assert!(html_el.is_root());
+        assert!(!root_el.is_root());
+        assert!(first_el.is_empty());
+        assert!(!root_el.is_empty());
+        assert!(html_el.parent_element().is_none());
+    }
+
+    #[test]
+    fn find_css_matches_attributes_and_classes() {
+        let tree = sample_tree();
+        let second = tree.index().by_id("second").expect("missing second");
+
+        let selector =
+            Selector::parse("div#root[data-role=\"main\"] > span.hit").expect("selector parse");
+        let matches = find_css(&selector, &tree);
+        assert_eq!(matches, vec![second]);
+    }
+}
