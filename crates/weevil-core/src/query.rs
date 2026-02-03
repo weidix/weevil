@@ -8,6 +8,7 @@ use crate::xpath::XPath;
 
 mod selector_exec;
 mod xpath_exec;
+mod xpath_predicate;
 
 use selector_exec::find_selector_in;
 use xpath_exec::find_xpath_in;

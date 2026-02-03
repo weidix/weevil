@@ -3,6 +3,7 @@
 mod error;
 mod index;
 mod iter;
+mod serialize;
 
 #[cfg(test)]
 mod tests;

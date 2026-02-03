@@ -5,11 +5,15 @@ use xee_xpath_ast::ast;
 use xee_xpath_ast::{FN_NAMESPACE, Name};
 use xot::xmlname::NameStrInfo;
 
+use super::xpath_predicate::apply_predicates;
 use super::{QueryExecError, QueryExecFeature};
 
-const XPATH_HINT: &str = "Supported XPath: a single path expression; axes child, descendant, descendant-or-self, self, parent, ancestor, ancestor-or-self, following-sibling, preceding-sibling; name and kind node tests (document, element, text, comment, processing-instruction); predicates with a single integer literal [n] (1-based); fn:root() only.";
+const XPATH_HINT: &str = "Supported XPath: a single path expression; axes child, descendant, descendant-or-self, self, parent, ancestor, ancestor-or-self, following-sibling, preceding-sibling; name and kind node tests (document, element, text, comment, processing-instruction); predicates with a single integer literal [n] (1-based), attribute existence [@id], string comparisons on @attr/text()/., boolean and/or, contains()/starts-with() with string args; fn:root() only.";
 
-fn xpath_unsupported(feature: QueryExecFeature, detail: impl Into<String>) -> QueryExecError {
+pub(super) fn xpath_unsupported(
+    feature: QueryExecFeature,
+    detail: impl Into<String>,
+) -> QueryExecError {
     QueryExecError::unsupported(feature, detail, Some(XPATH_HINT))
 }
 
@@ -40,7 +44,7 @@ pub(crate) fn find_xpath_in(
     }
 }
 
-fn eval_path_expr(
+pub(super) fn eval_path_expr(
     tree: &HtmlTree,
     path: &ast::PathExpr,
     mut context: Vec<NodeId>,
@@ -106,7 +110,7 @@ fn eval_axis_step(
             }
         }
 
-        let filtered = apply_predicates(matches, &axis_step.predicates)?;
+        let filtered = apply_predicates(tree, matches, &axis_step.predicates)?;
         for node in filtered {
             if seen.insert(node) {
                 results.push(node);
@@ -275,67 +279,7 @@ fn namespace_matches(element: &crate::html::ElementData, namespace: &str) -> boo
     element.name.ns.as_ref() == namespace
 }
 
-fn apply_predicates(
-    nodes: Vec<NodeId>,
-    predicates: &[ast::ExprS],
-) -> Result<Vec<NodeId>, QueryExecError> {
-    let mut current = nodes;
-    for predicate in predicates {
-        let Some(index) = predicate_index(predicate)? else {
-            return Err(xpath_unsupported(
-                QueryExecFeature::XPathPredicate,
-                "predicate expressions other than a single integer literal are not supported",
-            ));
-        };
-        if index == 0 || index > current.len() {
-            current.clear();
-            continue;
-        }
-        current = vec![current[index - 1]];
-    }
-    Ok(current)
-}
-
-fn predicate_index(predicate: &ast::ExprS) -> Result<Option<usize>, QueryExecError> {
-    let exprs = &predicate.value.0;
-    if exprs.len() != 1 {
-        return Ok(None);
-    }
-
-    let ast::ExprSingle::Path(path) = &exprs[0].value else {
-        return Ok(None);
-    };
-    if path.steps.len() != 1 {
-        return Ok(None);
-    }
-    let ast::StepExpr::PrimaryExpr(primary) = &path.steps[0].value else {
-        return Ok(None);
-    };
-    let ast::PrimaryExpr::Literal(ast::Literal::Integer(value)) = &primary.value else {
-        return Ok(None);
-    };
-
-    if value.to_f64() <= 0.0 {
-        return Ok(Some(0));
-    }
-
-    let rendered_value = format!("{value}");
-    let index = u64::try_from(value).map_err(|_| {
-        xpath_unsupported(
-            QueryExecFeature::XPathPredicate,
-            format!("predicate index {rendered_value} is out of range"),
-        )
-    })?;
-    let index = usize::try_from(index).map_err(|_| {
-        xpath_unsupported(
-            QueryExecFeature::XPathPredicate,
-            format!("predicate index {rendered_value} is out of range"),
-        )
-    })?;
-    Ok(Some(index))
-}
-
-fn expr_single_kind(expr: &ast::ExprSingle) -> &'static str {
+pub(super) fn expr_single_kind(expr: &ast::ExprSingle) -> &'static str {
     match expr {
         ast::ExprSingle::Path(_) => "path expression",
         ast::ExprSingle::Apply(_) => "apply expression",
@@ -347,7 +291,7 @@ fn expr_single_kind(expr: &ast::ExprSingle) -> &'static str {
     }
 }
 
-fn primary_expr_kind(expr: &ast::PrimaryExpr) -> &'static str {
+pub(super) fn primary_expr_kind(expr: &ast::PrimaryExpr) -> &'static str {
     match expr {
         ast::PrimaryExpr::Literal(_) => "literal",
         ast::PrimaryExpr::VarRef(_) => "variable reference",
@@ -427,6 +371,12 @@ mod tests {
         HtmlTree::parse(html)
     }
 
+    fn predicate_tree() -> HtmlTree {
+        let html =
+            r#"<div id="root"><span id="first">Hello</span><span class="title">World</span></div>"#;
+        HtmlTree::parse(html)
+    }
+
     #[test]
     fn find_xpath_handles_axes_and_predicates() {
         let tree = sample_tree();
@@ -480,5 +430,29 @@ mod tests {
         let xpath = XPath::parse("//span[0]").unwrap();
         let matches = find_xpath_in(&xpath, &tree, tree.document()).unwrap();
         assert!(matches.is_empty());
+    }
+
+    #[test]
+    fn find_xpath_supports_attribute_and_text_predicates() {
+        let tree = predicate_tree();
+        let first = tree.index().by_id("first").expect("missing first");
+        let root = tree.index().by_id("root").expect("missing root");
+        let title = tree.index().by_class("title").expect("missing title")[0];
+
+        let xpath = XPath::parse("//span[@id]").unwrap();
+        let matches = find_xpath_in(&xpath, &tree, tree.document()).unwrap();
+        assert_eq!(matches, vec![first]);
+
+        let xpath = XPath::parse("//span[contains(@class, 'title')]").unwrap();
+        let matches = find_xpath_in(&xpath, &tree, tree.document()).unwrap();
+        assert_eq!(matches, vec![title]);
+
+        let xpath = XPath::parse("//span[text()='Hello']").unwrap();
+        let matches = find_xpath_in(&xpath, &tree, tree.document()).unwrap();
+        assert_eq!(matches, vec![first]);
+
+        let xpath = XPath::parse("//div[contains(., 'World')]").unwrap();
+        let matches = find_xpath_in(&xpath, &tree, tree.document()).unwrap();
+        assert_eq!(matches, vec![root]);
     }
 }

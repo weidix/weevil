@@ -94,3 +94,17 @@ fn parse_with_errors_reports_issues() {
     let err = HtmlTree::parse_checked(html).unwrap_err();
     assert!(!err.errors().is_empty());
 }
+
+#[test]
+fn html_and_text_helpers_render_content() {
+    let html = r#"<div id="root"><span>hi</span><!--c--></div>"#;
+    let tree = parse(html);
+    let root = tree.index().by_id("root").expect("missing root");
+
+    assert_eq!(tree.html(root), "<span>hi</span><!--c-->");
+    assert_eq!(
+        tree.outer_html(root),
+        r#"<div id="root"><span>hi</span><!--c--></div>"#
+    );
+    assert_eq!(tree.text(root), "hi");
+}

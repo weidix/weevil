@@ -51,6 +51,8 @@ println!("errors: {}", output.errors.len());
   class.
 - Convenience helpers:
   - `HtmlTree::text_content(id)` aggregates descendant text nodes.
+  - `HtmlTree::html(id)` and `HtmlTree::outer_html(id)` render inner/outer HTML.
+  - `HtmlTree::text(id)` is an alias for `text_content`.
   - `HtmlTree::attr(id, name)` returns element attributes.
   - `HtmlTree::descendants(id)` and `HtmlTree::subtree(id)` iterate in document order.
   - `Selector::select_one` / `XPath::select_one` return the first match.
@@ -70,8 +72,10 @@ println!("errors: {}", output.errors.len());
   `ancestor-or-self`, `following-sibling`, `preceding-sibling`.
 - Node tests: name tests (`*`, local name, namespace) and kind tests (`document`, `element`,
   `text`, `comment`, `processing-instruction`).
-- Predicates: a single integer literal `[n]` (1-based).
-- Function calls: `fn:root()` only.
+- Predicates: a single integer literal `[n]` (1-based), attribute existence (`[@id]`), string
+  comparisons on `@attr`, `text()`, or `.` (for example `[@id='hero']`, `[text()='Hello']`), boolean
+  `and`/`or`, and `contains()` / `starts-with()` with string arguments.
+- Function calls: `fn:root()` in paths plus `contains()` / `starts-with()` in predicates.
 
 Unsupported XPath constructs return a `QueryExecError` with a feature category, detailed message,
 and a hint describing the supported subset.
