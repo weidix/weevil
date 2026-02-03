@@ -224,7 +224,12 @@ where
     }
 }
 
-pub(crate) fn find_selector(selector: &Selector, tree: &HtmlTree) -> Vec<NodeId> {
+pub(crate) fn find_selector_in(
+    selector: &Selector,
+    tree: &HtmlTree,
+    start: NodeId,
+    scope_element: Option<NodeId>,
+) -> Vec<NodeId> {
     let mut caches = SelectorCaches::default();
     let quirks = selector_quirks_mode(tree.quirks_mode());
     let mut context = MatchingContext::new(
@@ -236,12 +241,10 @@ pub(crate) fn find_selector(selector: &Selector, tree: &HtmlTree) -> Vec<NodeId>
         MatchingForInvalidation::No,
     );
 
-    context.scope_element = tree
-        .root_element()
-        .map(|id| HtmlElement::new(tree, id).opaque());
+    context.scope_element = scope_element.map(|id| HtmlElement::new(tree, id).opaque());
 
     let mut matches = Vec::new();
-    traverse_preorder(tree, tree.document(), |node_id| {
+    traverse_preorder(tree, start, |node_id| {
         if matches!(tree.node(node_id).kind(), NodeKind::Element(_)) {
             let element = HtmlElement::new(tree, node_id);
             if matching::matches_selector_list(selector.selector_list(), &element, &mut context) {
@@ -306,7 +309,7 @@ mod tests {
 
         let selector =
             Selector::parse("div#root[data-role=\"main\"] > span.hit").expect("selector parse");
-        let matches = find_selector(&selector, &tree);
+        let matches = find_selector_in(&selector, &tree, tree.document(), tree.root_element());
         assert_eq!(matches, vec![second]);
     }
 }

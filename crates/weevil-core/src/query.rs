@@ -2,15 +2,15 @@
 
 use std::fmt;
 
-use crate::html::{HtmlTree, NodeId};
+use crate::html::{HtmlTree, NodeId, NodeKind};
 use crate::selector::{Selector, SelectorError};
 use crate::xpath::{XPath, XPathError};
 
 mod selector_exec;
 mod xpath_exec;
 
-use selector_exec::find_selector;
-use xpath_exec::find_xpath;
+use selector_exec::find_selector_in;
+use xpath_exec::find_xpath_in;
 
 /// Supported query languages.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -39,27 +39,39 @@ impl Query {
         }
     }
 
-    /// Executes the query against a parsed HTML tree.
-    pub fn find(&self, tree: &HtmlTree) -> Result<Vec<NodeId>, QueryExecError> {
+    /// Executes the query against a parsed HTML tree or subtree.
+    pub fn find<C>(&self, context: C) -> Result<Vec<NodeId>, QueryExecError>
+    where
+        C: QueryContext,
+    {
         match self {
-            Query::Selector(selector) => selector.find(tree),
-            Query::XPath(xpath) => xpath.find(tree),
+            Query::Selector(selector) => selector.find(context),
+            Query::XPath(xpath) => xpath.find(context),
         }
     }
 
     /// Returns the first matching node, if any.
-    pub fn find_first(&self, tree: &HtmlTree) -> Result<Option<NodeId>, QueryExecError> {
-        QueryExecutor::find_first(self, tree)
+    pub fn find_first<C>(&self, context: C) -> Result<Option<NodeId>, QueryExecError>
+    where
+        C: QueryContext,
+    {
+        QueryExecutor::find_first(self, context)
     }
 
     /// Alias for `find_first`.
-    pub fn select_one(&self, tree: &HtmlTree) -> Result<Option<NodeId>, QueryExecError> {
-        self.find_first(tree)
+    pub fn select_one<C>(&self, context: C) -> Result<Option<NodeId>, QueryExecError>
+    where
+        C: QueryContext,
+    {
+        self.find_first(context)
     }
 
     /// Alias for `find_first`.
-    pub fn first_match(&self, tree: &HtmlTree) -> Result<Option<NodeId>, QueryExecError> {
-        self.find_first(tree)
+    pub fn first_match<C>(&self, context: C) -> Result<Option<NodeId>, QueryExecError>
+    where
+        C: QueryContext,
+    {
+        self.find_first(context)
     }
 }
 
@@ -81,14 +93,63 @@ impl fmt::Display for QueryError {
 
 impl std::error::Error for QueryError {}
 
+/// Query execution context, either the whole tree or a subtree.
+pub trait QueryContext {
+    /// Returns the tree for this context.
+    fn tree(&self) -> &HtmlTree;
+
+    /// Returns the starting node id for this context.
+    fn start(&self) -> NodeId;
+
+    /// Returns the selector scope element for this context, if any.
+    fn scope_element(&self) -> Option<NodeId>;
+}
+
+impl QueryContext for &HtmlTree {
+    fn tree(&self) -> &HtmlTree {
+        self
+    }
+
+    fn start(&self) -> NodeId {
+        self.document()
+    }
+
+    fn scope_element(&self) -> Option<NodeId> {
+        self.root_element()
+    }
+}
+
+impl QueryContext for (&HtmlTree, NodeId) {
+    fn tree(&self) -> &HtmlTree {
+        self.0
+    }
+
+    fn start(&self) -> NodeId {
+        self.1
+    }
+
+    fn scope_element(&self) -> Option<NodeId> {
+        match self.0.node(self.1).kind() {
+            NodeKind::Element(_) => Some(self.1),
+            NodeKind::Document => self.0.root_element(),
+            _ => None,
+        }
+    }
+}
+
 /// Unified query execution interface for CSS selectors and XPath expressions.
 pub trait QueryExecutor {
     /// Returns all nodes matching the query.
-    fn find(&self, tree: &HtmlTree) -> Result<Vec<NodeId>, QueryExecError>;
+    fn find<C>(&self, context: C) -> Result<Vec<NodeId>, QueryExecError>
+    where
+        C: QueryContext;
 
     /// Returns the first node matching the query, if any.
-    fn find_first(&self, tree: &HtmlTree) -> Result<Option<NodeId>, QueryExecError> {
-        Ok(self.find(tree)?.into_iter().next())
+    fn find_first<C>(&self, context: C) -> Result<Option<NodeId>, QueryExecError>
+    where
+        C: QueryContext,
+    {
+        Ok(self.find(context)?.into_iter().next())
     }
 }
 
@@ -175,54 +236,86 @@ impl fmt::Display for QueryExecError {
 impl std::error::Error for QueryExecError {}
 
 impl QueryExecutor for Selector {
-    fn find(&self, tree: &HtmlTree) -> Result<Vec<NodeId>, QueryExecError> {
-        Ok(find_selector(self, tree))
+    fn find<C>(&self, context: C) -> Result<Vec<NodeId>, QueryExecError>
+    where
+        C: QueryContext,
+    {
+        Ok(find_selector_in(
+            self,
+            context.tree(),
+            context.start(),
+            context.scope_element(),
+        ))
     }
 }
 
 impl QueryExecutor for XPath {
-    fn find(&self, tree: &HtmlTree) -> Result<Vec<NodeId>, QueryExecError> {
-        find_xpath(self, tree)
+    fn find<C>(&self, context: C) -> Result<Vec<NodeId>, QueryExecError>
+    where
+        C: QueryContext,
+    {
+        find_xpath_in(self, context.tree(), context.start())
     }
 }
 
 impl QueryExecutor for Query {
-    fn find(&self, tree: &HtmlTree) -> Result<Vec<NodeId>, QueryExecError> {
-        Query::find(self, tree)
+    fn find<C>(&self, context: C) -> Result<Vec<NodeId>, QueryExecError>
+    where
+        C: QueryContext,
+    {
+        Query::find(self, context)
     }
 }
 
 impl Selector {
     /// Returns the first matching node, if any.
-    pub fn find_first(&self, tree: &HtmlTree) -> Result<Option<NodeId>, QueryExecError> {
-        QueryExecutor::find_first(self, tree)
+    pub fn find_first<C>(&self, context: C) -> Result<Option<NodeId>, QueryExecError>
+    where
+        C: QueryContext,
+    {
+        QueryExecutor::find_first(self, context)
     }
 
     /// Alias for `find_first`.
-    pub fn select_one(&self, tree: &HtmlTree) -> Result<Option<NodeId>, QueryExecError> {
-        self.find_first(tree)
+    pub fn select_one<C>(&self, context: C) -> Result<Option<NodeId>, QueryExecError>
+    where
+        C: QueryContext,
+    {
+        self.find_first(context)
     }
 
     /// Alias for `find_first`.
-    pub fn first_match(&self, tree: &HtmlTree) -> Result<Option<NodeId>, QueryExecError> {
-        self.find_first(tree)
+    pub fn first_match<C>(&self, context: C) -> Result<Option<NodeId>, QueryExecError>
+    where
+        C: QueryContext,
+    {
+        self.find_first(context)
     }
 }
 
 impl XPath {
     /// Returns the first matching node, if any.
-    pub fn find_first(&self, tree: &HtmlTree) -> Result<Option<NodeId>, QueryExecError> {
-        QueryExecutor::find_first(self, tree)
+    pub fn find_first<C>(&self, context: C) -> Result<Option<NodeId>, QueryExecError>
+    where
+        C: QueryContext,
+    {
+        QueryExecutor::find_first(self, context)
     }
 
     /// Alias for `find_first`.
-    pub fn select_one(&self, tree: &HtmlTree) -> Result<Option<NodeId>, QueryExecError> {
-        self.find_first(tree)
+    pub fn select_one<C>(&self, context: C) -> Result<Option<NodeId>, QueryExecError>
+    where
+        C: QueryContext,
+    {
+        self.find_first(context)
     }
 
     /// Alias for `find_first`.
-    pub fn first_match(&self, tree: &HtmlTree) -> Result<Option<NodeId>, QueryExecError> {
-        self.find_first(tree)
+    pub fn first_match<C>(&self, context: C) -> Result<Option<NodeId>, QueryExecError>
+    where
+        C: QueryContext,
+    {
+        self.find_first(context)
     }
 }
 
@@ -301,5 +394,34 @@ mod tests {
         assert_eq!(selector.find_first(&tree).unwrap(), Some(first));
         assert_eq!(selector.select_one(&tree).unwrap(), Some(first));
         assert_eq!(selector.first_match(&tree).unwrap(), Some(first));
+    }
+
+    #[test]
+    fn query_context_limits_scope() {
+        let html = r#"
+        <div id="outer">
+          <span id="inner"></span>
+        </div>
+        <span id="outside"></span>
+        "#;
+        let tree = HtmlTree::parse(html);
+        let outer = tree.index().by_id("outer").expect("missing outer");
+        let inner = tree.index().by_id("inner").expect("missing inner");
+        let outside = tree.index().by_id("outside").expect("missing outside");
+
+        let selector = Selector::parse("span").unwrap();
+        let matches = selector.find(&tree).unwrap();
+        assert_eq!(matches, vec![inner, outside]);
+
+        let matches = selector.find((&tree, outer)).unwrap();
+        assert_eq!(matches, vec![inner]);
+
+        let xpath = XPath::parse("descendant::span").unwrap();
+        let matches = xpath.find((&tree, outer)).unwrap();
+        assert_eq!(matches, vec![inner]);
+
+        let query = Query::XPath(xpath);
+        let matches = query.find((&tree, outer)).unwrap();
+        assert_eq!(matches, vec![inner]);
     }
 }

@@ -13,7 +13,11 @@ fn xpath_unsupported(feature: QueryExecFeature, detail: impl Into<String>) -> Qu
     QueryExecError::unsupported(feature, detail, Some(XPATH_HINT))
 }
 
-pub(crate) fn find_xpath(xpath: &XPath, tree: &HtmlTree) -> Result<Vec<NodeId>, QueryExecError> {
+pub(crate) fn find_xpath_in(
+    xpath: &XPath,
+    tree: &HtmlTree,
+    start: NodeId,
+) -> Result<Vec<NodeId>, QueryExecError> {
     let expr = &xpath.0.0;
     let exprs = &expr.value.0;
     if exprs.len() != 1 {
@@ -25,7 +29,7 @@ pub(crate) fn find_xpath(xpath: &XPath, tree: &HtmlTree) -> Result<Vec<NodeId>, 
     }
 
     match &exprs[0].value {
-        ast::ExprSingle::Path(path) => eval_path_expr(tree, path, vec![tree.document()]),
+        ast::ExprSingle::Path(path) => eval_path_expr(tree, path, vec![start]),
         other => Err(xpath_unsupported(
             QueryExecFeature::XPathExpression,
             format!(
@@ -432,31 +436,31 @@ mod tests {
         let outer = tree.index().by_id("outer").expect("missing outer");
 
         let xpath = XPath::parse("//span[1]").unwrap();
-        let matches = find_xpath(&xpath, &tree).unwrap();
+        let matches = find_xpath_in(&xpath, &tree, tree.document()).unwrap();
         assert_eq!(matches, vec![first]);
 
         let xpath = XPath::parse("//span/following-sibling::span").unwrap();
-        let matches = find_xpath(&xpath, &tree).unwrap();
+        let matches = find_xpath_in(&xpath, &tree, tree.document()).unwrap();
         assert_eq!(matches, vec![second]);
 
         let xpath = XPath::parse("//span/preceding-sibling::span").unwrap();
-        let matches = find_xpath(&xpath, &tree).unwrap();
+        let matches = find_xpath_in(&xpath, &tree, tree.document()).unwrap();
         assert_eq!(matches, vec![first]);
 
         let xpath = XPath::parse("//em/ancestor::div").unwrap();
-        let matches = find_xpath(&xpath, &tree).unwrap();
+        let matches = find_xpath_in(&xpath, &tree, tree.document()).unwrap();
         assert_eq!(matches, vec![outer]);
 
         let xpath = XPath::parse("//em/parent::div").unwrap();
-        let matches = find_xpath(&xpath, &tree).unwrap();
+        let matches = find_xpath_in(&xpath, &tree, tree.document()).unwrap();
         assert_eq!(matches, vec![outer]);
 
         let xpath = XPath::parse("//em/self::em").unwrap();
-        let matches = find_xpath(&xpath, &tree).unwrap();
+        let matches = find_xpath_in(&xpath, &tree, tree.document()).unwrap();
         assert_eq!(matches, vec![third]);
 
         let xpath = XPath::parse("//div/descendant::em").unwrap();
-        let matches = find_xpath(&xpath, &tree).unwrap();
+        let matches = find_xpath_in(&xpath, &tree, tree.document()).unwrap();
         assert_eq!(matches, vec![third]);
     }
 
@@ -464,7 +468,7 @@ mod tests {
     fn find_xpath_rejects_unsupported_axis() {
         let tree = sample_tree();
         let xpath = XPath::parse("//span/attribute::id").unwrap();
-        let err = find_xpath(&xpath, &tree).unwrap_err();
+        let err = find_xpath_in(&xpath, &tree, tree.document()).unwrap_err();
         assert_eq!(err.feature(), QueryExecFeature::XPathAxis);
         assert!(err.detail().contains("attribute"));
         assert!(err.hint().is_some());
@@ -474,7 +478,7 @@ mod tests {
     fn find_xpath_zero_predicate_is_empty() {
         let tree = sample_tree();
         let xpath = XPath::parse("//span[0]").unwrap();
-        let matches = find_xpath(&xpath, &tree).unwrap();
+        let matches = find_xpath_in(&xpath, &tree, tree.document()).unwrap();
         assert!(matches.is_empty());
     }
 }

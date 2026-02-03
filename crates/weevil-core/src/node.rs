@@ -127,6 +127,22 @@ pub struct ElementData {
 }
 
 impl ElementData {
+    /// Returns the element local tag name (e.g., "div").
+    pub fn tag_name(&self) -> &str {
+        self.name.local.as_ref()
+    }
+
+    /// Returns the element namespace URL.
+    pub fn namespace(&self) -> &str {
+        self.name.ns.as_ref()
+    }
+
+    /// Returns true if the element local name matches the provided name.
+    pub fn is_tag(&self, name: &str) -> bool {
+        let normalized = normalize_tag_name(name);
+        self.name.local.as_ref() == normalized.as_ref()
+    }
+
     /// Returns the attribute value for a name, if present.
     pub fn attr_value(&self, name: &str) -> Option<&str> {
         let normalized = normalize_tag_name(name);
@@ -135,6 +151,72 @@ impl ElementData {
             .iter()
             .find(|attr| attr.name.local == local)
             .map(|attr| attr.value.as_ref())
+    }
+
+    /// Alias for [`ElementData::attr_value`].
+    pub fn attr(&self, name: &str) -> Option<&str> {
+        self.attr_value(name)
+    }
+
+    /// Returns true if the element has the attribute name.
+    pub fn has_attr(&self, name: &str) -> bool {
+        self.attr_value(name).is_some()
+    }
+
+    /// Returns the id attribute value if present.
+    pub fn id(&self) -> Option<&str> {
+        self.attr_value("id")
+    }
+
+    /// Returns the class attribute value if present.
+    pub fn class_value(&self) -> Option<&str> {
+        self.attr_value("class")
+    }
+
+    /// Returns an iterator of attribute local names.
+    pub fn attr_names(&self) -> impl Iterator<Item = &str> + '_ {
+        self.attrs.iter().map(|attr| attr.name.local.as_ref())
+    }
+
+    /// Returns an iterator of attribute name/value pairs.
+    pub fn attrs(&self) -> impl Iterator<Item = (&str, &str)> + '_ {
+        self.attrs
+            .iter()
+            .map(|attr| (attr.name.local.as_ref(), attr.value.as_ref()))
+    }
+
+    /// Returns an iterator of whitespace-separated tokens for an attribute.
+    pub fn attr_tokens(&self, name: &str) -> impl Iterator<Item = &str> + '_ {
+        self.attr_value(name)
+            .into_iter()
+            .flat_map(|value| value.split_ascii_whitespace())
+    }
+
+    /// Returns an iterator of classes from the class attribute.
+    pub fn classes(&self) -> impl Iterator<Item = &str> + '_ {
+        self.attr_tokens("class")
+    }
+
+    /// Returns the class list as a vector.
+    pub fn class_list(&self) -> Vec<&str> {
+        self.classes().collect()
+    }
+
+    /// Returns true if the element class list contains the provided class.
+    pub fn has_class(&self, name: &str) -> bool {
+        self.classes().any(|class| class == name)
+    }
+
+    /// Returns the data-* attribute value for the provided key.
+    pub fn data(&self, key: &str) -> Option<&str> {
+        let name = format!("data-{key}");
+        self.attr_value(&name)
+    }
+
+    /// Returns the aria-* attribute value for the provided key.
+    pub fn aria(&self, key: &str) -> Option<&str> {
+        let name = format!("aria-{key}");
+        self.attr_value(&name)
     }
 }
 
@@ -198,6 +280,71 @@ mod tests {
         assert_eq!(data.attr_value("ID"), Some("Hero"));
         assert_eq!(data.attr_value("class"), Some("a b"));
         assert_eq!(data.attr_value("missing"), None);
+    }
+
+    #[test]
+    fn element_tag_helpers() {
+        let data = ElementData {
+            name: QualName::new(None, ns!(html), local_name!("div")),
+            attrs: Vec::new(),
+            template_contents: None,
+            mathml_annotation_xml_integration_point: false,
+        };
+
+        assert_eq!(data.tag_name(), "div");
+        assert_eq!(data.namespace(), ns!(html).as_ref());
+        assert!(data.is_tag("DIV"));
+        assert!(!data.is_tag("span"));
+    }
+
+    #[test]
+    fn element_attr_helpers() {
+        let data = ElementData {
+            name: QualName::new(None, ns!(html), local_name!("div")),
+            attrs: vec![
+                make_attr("id", "hero"),
+                make_attr("class", "  a   b  "),
+                make_attr("data-role", "main"),
+                make_attr("aria-label", "Hero"),
+                make_attr("rel", "nofollow noopener"),
+            ],
+            template_contents: None,
+            mathml_annotation_xml_integration_point: false,
+        };
+
+        assert_eq!(data.attr("ID"), Some("hero"));
+        assert!(data.has_attr("data-role"));
+        assert_eq!(data.id(), Some("hero"));
+        assert_eq!(data.class_value(), Some("  a   b  "));
+
+        let classes: Vec<_> = data.classes().collect();
+        assert_eq!(classes, vec!["a", "b"]);
+        assert_eq!(data.class_list(), vec!["a", "b"]);
+        assert!(data.has_class("b"));
+        assert!(!data.has_class("c"));
+
+        assert_eq!(data.data("role"), Some("main"));
+        assert_eq!(data.aria("label"), Some("Hero"));
+
+        let rel: Vec<_> = data.attr_tokens("rel").collect();
+        assert_eq!(rel, vec!["nofollow", "noopener"]);
+
+        let mut names: Vec<_> = data.attr_names().collect();
+        names.sort_unstable();
+        assert_eq!(names, vec!["aria-label", "class", "data-role", "id", "rel"]);
+
+        let mut attrs: Vec<_> = data.attrs().collect();
+        attrs.sort_by(|left, right| left.0.cmp(right.0));
+        assert_eq!(
+            attrs,
+            vec![
+                ("aria-label", "Hero"),
+                ("class", "  a   b  "),
+                ("data-role", "main"),
+                ("id", "hero"),
+                ("rel", "nofollow noopener"),
+            ]
+        );
     }
 
     #[test]
