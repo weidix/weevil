@@ -1,25 +1,37 @@
 use crate::html::{HtmlTree, NodeId, NodeKind};
 use crate::xpath::XPath;
 use rustc_hash::FxHashSet;
-use xee_xpath_ast::FN_NAMESPACE;
 use xee_xpath_ast::ast;
+use xee_xpath_ast::{FN_NAMESPACE, Name};
 use xot::xmlname::NameStrInfo;
 
-use super::QueryExecError;
+use super::{QueryExecError, QueryExecFeature};
+
+const XPATH_HINT: &str = "Supported XPath: a single path expression; axes child, descendant, descendant-or-self, self, parent, ancestor, ancestor-or-self, following-sibling, preceding-sibling; name and kind node tests (document, element, text, comment, processing-instruction); predicates with a single integer literal [n] (1-based); fn:root() only.";
+
+fn xpath_unsupported(feature: QueryExecFeature, detail: impl Into<String>) -> QueryExecError {
+    QueryExecError::unsupported(feature, detail, Some(XPATH_HINT))
+}
 
 pub(crate) fn find_xpath(xpath: &XPath, tree: &HtmlTree) -> Result<Vec<NodeId>, QueryExecError> {
     let expr = &xpath.0.0;
     let exprs = &expr.value.0;
     if exprs.len() != 1 {
-        return Err(QueryExecError::Unsupported(
-            "xpath execution expects a single expression",
+        let count = exprs.len();
+        return Err(xpath_unsupported(
+            QueryExecFeature::XPathExpression,
+            format!("expected a single expression, got {count}"),
         ));
     }
 
     match &exprs[0].value {
         ast::ExprSingle::Path(path) => eval_path_expr(tree, path, vec![tree.document()]),
-        _ => Err(QueryExecError::Unsupported(
-            "xpath execution only supports path expressions",
+        other => Err(xpath_unsupported(
+            QueryExecFeature::XPathExpression,
+            format!(
+                "only path expressions are supported, got {}",
+                expr_single_kind(other)
+            ),
         )),
     }
 }
@@ -34,8 +46,9 @@ fn eval_path_expr(
             ast::StepExpr::AxisStep(axis_step) => eval_axis_step(tree, axis_step, &context)?,
             ast::StepExpr::PrimaryExpr(primary) => eval_primary_step(tree, primary, &context)?,
             ast::StepExpr::PostfixExpr { .. } => {
-                return Err(QueryExecError::Unsupported(
-                    "xpath postfix steps are not supported",
+                return Err(xpath_unsupported(
+                    QueryExecFeature::XPathPostfix,
+                    "postfix steps are not supported",
                 ));
             }
         };
@@ -55,13 +68,19 @@ fn eval_primary_step(
             if name.local_name() == "root" && name.namespace() == FN_NAMESPACE {
                 return Ok(vec![tree.document()]);
             }
-            Err(QueryExecError::Unsupported(
-                "xpath function calls are not supported",
+            let qualified = format_function_name(name);
+            Err(xpath_unsupported(
+                QueryExecFeature::XPathFunction,
+                format!("function {qualified} is not supported"),
             ))
         }
         ast::PrimaryExpr::ContextItem => Ok(context.to_vec()),
-        _ => Err(QueryExecError::Unsupported(
-            "xpath primary expressions are not supported",
+        other => Err(xpath_unsupported(
+            QueryExecFeature::XPathPrimaryExpr,
+            format!(
+                "primary expression {} is not supported",
+                primary_expr_kind(other)
+            ),
         )),
     }
 }
@@ -109,17 +128,12 @@ fn axis_nodes(
         ast::Axis::AncestorOrSelf => Ok(ancestors(tree, context, true)),
         ast::Axis::FollowingSibling => Ok(following_siblings(tree, context)),
         ast::Axis::PrecedingSibling => Ok(preceding_siblings(tree, context)),
-        ast::Axis::Attribute => Err(QueryExecError::Unsupported(
-            "xpath attribute axis is not supported",
-        )),
-        ast::Axis::Namespace => Err(QueryExecError::Unsupported(
-            "xpath namespace axis is not supported",
-        )),
-        ast::Axis::Following => Err(QueryExecError::Unsupported(
-            "xpath following axis is not supported",
-        )),
-        ast::Axis::Preceding => Err(QueryExecError::Unsupported(
-            "xpath preceding axis is not supported",
+        ast::Axis::Attribute
+        | ast::Axis::Namespace
+        | ast::Axis::Following
+        | ast::Axis::Preceding => Err(xpath_unsupported(
+            QueryExecFeature::XPathAxis,
+            format!("axis {} is not supported", axis_label(axis)),
         )),
     }
 }
@@ -207,12 +221,12 @@ fn matches_kind_test(
             },
             _ => false,
         }),
-        ast::KindTest::Attribute(_) => Err(QueryExecError::Unsupported(
-            "xpath attribute node tests are not supported",
+        ast::KindTest::Attribute(_)
+        | ast::KindTest::SchemaElement(_)
+        | ast::KindTest::SchemaAttribute(_) => Err(xpath_unsupported(
+            QueryExecFeature::XPathKindTest,
+            format!("kind test {} is not supported", kind_test_label(kind_test)),
         )),
-        ast::KindTest::SchemaElement(_) | ast::KindTest::SchemaAttribute(_) => Err(
-            QueryExecError::Unsupported("xpath schema node tests are not supported"),
-        ),
         ast::KindTest::PI(test) => Ok(match tree.node(node_id).kind() {
             NodeKind::ProcessingInstruction { target, .. } => match test {
                 None => true,
@@ -224,8 +238,9 @@ fn matches_kind_test(
         }),
         ast::KindTest::Comment => Ok(matches!(tree.node(node_id).kind(), NodeKind::Comment(_))),
         ast::KindTest::Text => Ok(matches!(tree.node(node_id).kind(), NodeKind::Text(_))),
-        ast::KindTest::NamespaceNode => Err(QueryExecError::Unsupported(
-            "xpath namespace nodes are not supported",
+        ast::KindTest::NamespaceNode => Err(xpath_unsupported(
+            QueryExecFeature::XPathKindTest,
+            format!("kind test {} is not supported", kind_test_label(kind_test)),
         )),
     }
 }
@@ -263,8 +278,9 @@ fn apply_predicates(
     let mut current = nodes;
     for predicate in predicates {
         let Some(index) = predicate_index(predicate)? else {
-            return Err(QueryExecError::Unsupported(
-                "xpath predicate expressions are not supported",
+            return Err(xpath_unsupported(
+                QueryExecFeature::XPathPredicate,
+                "predicate expressions other than a single integer literal are not supported",
             ));
         };
         if index == 0 || index > current.len() {
@@ -299,11 +315,90 @@ fn predicate_index(predicate: &ast::ExprS) -> Result<Option<usize>, QueryExecErr
         return Ok(Some(0));
     }
 
-    let index = u64::try_from(value)
-        .map_err(|_| QueryExecError::Unsupported("xpath predicate index is out of range"))?;
-    let index = usize::try_from(index)
-        .map_err(|_| QueryExecError::Unsupported("xpath predicate index is out of range"))?;
+    let rendered_value = format!("{value}");
+    let index = u64::try_from(value).map_err(|_| {
+        xpath_unsupported(
+            QueryExecFeature::XPathPredicate,
+            format!("predicate index {rendered_value} is out of range"),
+        )
+    })?;
+    let index = usize::try_from(index).map_err(|_| {
+        xpath_unsupported(
+            QueryExecFeature::XPathPredicate,
+            format!("predicate index {rendered_value} is out of range"),
+        )
+    })?;
     Ok(Some(index))
+}
+
+fn expr_single_kind(expr: &ast::ExprSingle) -> &'static str {
+    match expr {
+        ast::ExprSingle::Path(_) => "path expression",
+        ast::ExprSingle::Apply(_) => "apply expression",
+        ast::ExprSingle::Let(_) => "let expression",
+        ast::ExprSingle::If(_) => "if expression",
+        ast::ExprSingle::Binary(_) => "binary expression",
+        ast::ExprSingle::For(_) => "for expression",
+        ast::ExprSingle::Quantified(_) => "quantified expression",
+    }
+}
+
+fn primary_expr_kind(expr: &ast::PrimaryExpr) -> &'static str {
+    match expr {
+        ast::PrimaryExpr::Literal(_) => "literal",
+        ast::PrimaryExpr::VarRef(_) => "variable reference",
+        ast::PrimaryExpr::Expr(_) => "parenthesized expression",
+        ast::PrimaryExpr::ContextItem => "context item",
+        ast::PrimaryExpr::FunctionCall(_) => "function call",
+        ast::PrimaryExpr::NamedFunctionRef(_) => "named function reference",
+        ast::PrimaryExpr::InlineFunction(_) => "inline function",
+        ast::PrimaryExpr::MapConstructor(_) => "map constructor",
+        ast::PrimaryExpr::ArrayConstructor(_) => "array constructor",
+        ast::PrimaryExpr::UnaryLookup(_) => "unary lookup",
+    }
+}
+
+fn axis_label(axis: &ast::Axis) -> &'static str {
+    match axis {
+        ast::Axis::Ancestor => "ancestor",
+        ast::Axis::AncestorOrSelf => "ancestor-or-self",
+        ast::Axis::Attribute => "attribute",
+        ast::Axis::Child => "child",
+        ast::Axis::Descendant => "descendant",
+        ast::Axis::DescendantOrSelf => "descendant-or-self",
+        ast::Axis::Following => "following",
+        ast::Axis::FollowingSibling => "following-sibling",
+        ast::Axis::Namespace => "namespace",
+        ast::Axis::Parent => "parent",
+        ast::Axis::Preceding => "preceding",
+        ast::Axis::PrecedingSibling => "preceding-sibling",
+        ast::Axis::Self_ => "self",
+    }
+}
+
+fn kind_test_label(kind_test: &ast::KindTest) -> &'static str {
+    match kind_test {
+        ast::KindTest::Any => "any",
+        ast::KindTest::Document(_) => "document",
+        ast::KindTest::Element(_) => "element",
+        ast::KindTest::Attribute(_) => "attribute",
+        ast::KindTest::SchemaElement(_) => "schema-element",
+        ast::KindTest::SchemaAttribute(_) => "schema-attribute",
+        ast::KindTest::PI(_) => "processing-instruction",
+        ast::KindTest::Comment => "comment",
+        ast::KindTest::Text => "text",
+        ast::KindTest::NamespaceNode => "namespace-node",
+    }
+}
+
+fn format_function_name(name: &Name) -> String {
+    let local = name.local_name();
+    let namespace = name.namespace();
+    if namespace.is_empty() {
+        local.to_string()
+    } else {
+        format!("{namespace}:{local}")
+    }
 }
 
 #[cfg(test)]
@@ -370,11 +465,9 @@ mod tests {
         let tree = sample_tree();
         let xpath = XPath::parse("//span/attribute::id").unwrap();
         let err = find_xpath(&xpath, &tree).unwrap_err();
-        match err {
-            QueryExecError::Unsupported(message) => {
-                assert!(message.contains("attribute axis"));
-            }
-        }
+        assert_eq!(err.feature(), QueryExecFeature::XPathAxis);
+        assert!(err.detail().contains("attribute"));
+        assert!(err.hint().is_some());
     }
 
     #[test]

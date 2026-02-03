@@ -1,14 +1,23 @@
 //! High-performance HTML tree parsing and indexing.
 
+mod error;
+mod index;
+mod iter;
+
+#[cfg(test)]
+mod tests;
+
 use html5ever::interface::tree_builder::{ElementFlags, NodeOrText, QuirksMode, TreeSink};
 use html5ever::tendril::{StrTendril, TendrilSink};
-use html5ever::{Attribute, LocalName, ParseOpts, QualName, local_name, ns, parse_document};
-use rustc_hash::FxHashMap;
+use html5ever::{Attribute, ParseOpts, QualName, parse_document};
 use std::borrow::Cow;
 use std::cell::{Cell, RefCell, UnsafeCell};
 
-use crate::node::normalize_tag_name;
 pub use crate::node::{ElementData, Node, NodeId, NodeKind};
+pub use error::{HtmlParseError, HtmlParseIssue};
+pub use index::HtmlIndex;
+use index::index_attr;
+pub use iter::{Children, Descendants, Subtree};
 
 /// DOM-like HTML tree with fast tag/id/class indexes.
 #[derive(Debug)]
@@ -19,14 +28,46 @@ pub struct HtmlTree {
     index: HtmlIndex,
 }
 
+/// Output returned by HTML parsing when keeping parser issues.
+#[derive(Debug)]
+pub struct HtmlParseOutput {
+    pub tree: HtmlTree,
+    pub errors: Vec<HtmlParseIssue>,
+}
+
 impl HtmlTree {
-    /// Parses UTF-8 HTML into a tree.
+    /// Parses UTF-8 HTML into a tree, ignoring parser issues.
     pub fn parse(html: &str) -> Self {
         Self::parse_bytes(html.as_bytes())
     }
 
-    /// Parses UTF-8 HTML from bytes into a tree.
+    /// Parses UTF-8 HTML from bytes into a tree, ignoring parser issues.
     pub fn parse_bytes(bytes: &[u8]) -> Self {
+        Self::parse_bytes_with_errors(bytes).tree
+    }
+
+    /// Parses UTF-8 HTML and returns an error when the parser reports issues.
+    pub fn parse_checked(html: &str) -> Result<Self, HtmlParseError> {
+        Self::parse_bytes_checked(html.as_bytes())
+    }
+
+    /// Parses UTF-8 HTML from bytes and returns an error when the parser reports issues.
+    pub fn parse_bytes_checked(bytes: &[u8]) -> Result<Self, HtmlParseError> {
+        let output = Self::parse_bytes_with_errors(bytes);
+        if output.errors.is_empty() {
+            Ok(output.tree)
+        } else {
+            Err(HtmlParseError::new(output.errors))
+        }
+    }
+
+    /// Parses UTF-8 HTML while retaining parser issues.
+    pub fn parse_with_errors(html: &str) -> HtmlParseOutput {
+        Self::parse_bytes_with_errors(html.as_bytes())
+    }
+
+    /// Parses UTF-8 HTML from bytes while retaining parser issues.
+    pub fn parse_bytes_with_errors(bytes: &[u8]) -> HtmlParseOutput {
         let sink = HtmlTreeBuilder::with_capacity(bytes.len());
         parse_document(sink, ParseOpts::default())
             .from_utf8()
@@ -48,6 +89,27 @@ impl HtmlTree {
         &self.nodes[id.index()]
     }
 
+    /// Returns element data for a node id if it is an element.
+    pub fn element(&self, id: NodeId) -> Option<&ElementData> {
+        self.node(id).kind().as_element()
+    }
+
+    /// Returns the attribute value for a node id if it is an element.
+    pub fn attr(&self, id: NodeId, name: &str) -> Option<&str> {
+        self.element(id)?.attr_value(name)
+    }
+
+    /// Returns the concatenated text content under a node.
+    pub fn text_content(&self, id: NodeId) -> String {
+        let mut text = String::new();
+        for node_id in self.subtree(id) {
+            if let NodeKind::Text(contents) = self.node(node_id).kind() {
+                text.push_str(contents.as_ref());
+            }
+        }
+        text
+    }
+
     /// Returns the index for fast lookups.
     pub fn index(&self) -> &HtmlIndex {
         &self.index
@@ -67,66 +129,17 @@ impl HtmlTree {
 
     /// Iterates over the direct children of a node in document order.
     pub fn children(&self, id: NodeId) -> Children<'_> {
-        Children {
-            tree: self,
-            next: self.node(id).first_child,
-        }
-    }
-}
-
-/// Iterator over child nodes.
-pub struct Children<'a> {
-    tree: &'a HtmlTree,
-    next: Option<NodeId>,
-}
-
-impl<'a> Iterator for Children<'a> {
-    type Item = NodeId;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let current = self.next?;
-        self.next = self.tree.node(current).next_sibling;
-        Some(current)
-    }
-}
-
-/// Fast tag/id/class index for a parsed HTML tree.
-#[derive(Debug, Default)]
-pub struct HtmlIndex {
-    by_id: FxHashMap<Box<str>, NodeId>,
-    by_tag: FxHashMap<LocalName, Vec<NodeId>>,
-    by_class: FxHashMap<Box<str>, Vec<NodeId>>,
-}
-
-impl HtmlIndex {
-    fn with_capacity(estimated_nodes: usize) -> Self {
-        Self {
-            by_id: FxHashMap::with_capacity_and_hasher(estimated_nodes / 8, Default::default()),
-            by_tag: FxHashMap::with_capacity_and_hasher(estimated_nodes / 2, Default::default()),
-            by_class: FxHashMap::with_capacity_and_hasher(estimated_nodes / 4, Default::default()),
-        }
+        Children::new(self, id)
     }
 
-    /// Looks up a node by id attribute.
-    pub fn by_id(&self, id: &str) -> Option<NodeId> {
-        self.by_id.get(id).copied()
+    /// Iterates over the descendants of a node in document order.
+    pub fn descendants(&self, id: NodeId) -> Descendants<'_> {
+        Descendants::new(self, id)
     }
 
-    /// Looks up nodes by a tag name (case-insensitive for ASCII).
-    pub fn by_tag(&self, name: &str) -> Option<&[NodeId]> {
-        let normalized = normalize_tag_name(name);
-        let local = LocalName::from(normalized.as_ref());
-        self.by_tag.get(&local).map(Vec::as_slice)
-    }
-
-    /// Looks up nodes by class name.
-    pub fn by_class(&self, class: &str) -> Option<&[NodeId]> {
-        self.by_class.get(class).map(Vec::as_slice)
-    }
-
-    /// Looks up nodes by an interned LocalName without extra allocations.
-    pub fn by_tag_local(&self, name: &LocalName) -> Option<&[NodeId]> {
-        self.by_tag.get(name).map(Vec::as_slice)
+    /// Iterates over a node and its descendants in document order.
+    pub fn subtree(&self, id: NodeId) -> Subtree<'_> {
+        Subtree::new(self, id)
     }
 }
 
@@ -134,6 +147,7 @@ struct HtmlTreeBuilder {
     // UnsafeCell enables &self mutation required by TreeSink with minimal overhead.
     nodes: UnsafeCell<Vec<Node>>,
     index: RefCell<HtmlIndex>,
+    parse_errors: RefCell<Vec<HtmlParseIssue>>,
     document: NodeId,
     quirks_mode: Cell<QuirksMode>,
 }
@@ -147,6 +161,7 @@ impl HtmlTreeBuilder {
         Self {
             nodes: UnsafeCell::new(nodes),
             index: RefCell::new(HtmlIndex::with_capacity(estimated_nodes)),
+            parse_errors: RefCell::new(Vec::new()),
             document,
             quirks_mode: Cell::new(QuirksMode::NoQuirks),
         }
@@ -178,11 +193,7 @@ impl HtmlTreeBuilder {
         };
 
         let mut index = self.index.borrow_mut();
-        index
-            .by_tag
-            .entry(element.name.local.clone())
-            .or_default()
-            .push(id);
+        index.insert_tag(element.name.local.clone(), id);
         for attr in &element.attrs {
             index_attr(&mut index, id, attr);
         }
@@ -191,22 +202,29 @@ impl HtmlTreeBuilder {
 
 impl TreeSink for HtmlTreeBuilder {
     type Handle = NodeId;
-    type Output = HtmlTree;
+    type Output = HtmlParseOutput;
     type ElemName<'a>
         = &'a QualName
     where
         Self: 'a;
 
     fn finish(self) -> Self::Output {
-        HtmlTree {
-            nodes: self.nodes.into_inner(),
-            document: self.document,
-            quirks_mode: self.quirks_mode.get(),
-            index: self.index.into_inner(),
+        HtmlParseOutput {
+            tree: HtmlTree {
+                nodes: self.nodes.into_inner(),
+                document: self.document,
+                quirks_mode: self.quirks_mode.get(),
+                index: self.index.into_inner(),
+            },
+            errors: self.parse_errors.into_inner(),
         }
     }
 
-    fn parse_error(&self, _msg: Cow<'static, str>) {}
+    fn parse_error(&self, msg: Cow<'static, str>) {
+        self.parse_errors
+            .borrow_mut()
+            .push(HtmlParseIssue::new(msg.into_owned()));
+    }
 
     fn get_document(&self) -> Self::Handle {
         self.document
@@ -471,93 +489,5 @@ fn detach_node(nodes: &mut Vec<Node>, target: NodeId) {
         nodes[prev_id.index()].next_sibling = next;
     } else if let Some(parent_id) = parent {
         nodes[parent_id.index()].first_child = next;
-    }
-}
-
-fn index_attr(index: &mut HtmlIndex, node_id: NodeId, attr: &Attribute) {
-    if attr.name.ns == ns!() && attr.name.local == local_name!("id") {
-        let value = attr.value.as_ref();
-        if value.is_empty() {
-            return;
-        }
-        index
-            .by_id
-            .entry(value.to_string().into_boxed_str())
-            .or_insert(node_id);
-        return;
-    }
-
-    if attr.name.ns == ns!() && attr.name.local == local_name!("class") {
-        for class in attr.value.split_ascii_whitespace() {
-            if class.is_empty() {
-                continue;
-            }
-            index
-                .by_class
-                .entry(class.to_string().into_boxed_str())
-                .or_default()
-                .push(node_id);
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parse_builds_fast_indexes() {
-        let html = r#"<html><body><div id="hero" class="a b"></div></body></html>"#;
-        let tree = HtmlTree::parse(html);
-        let index = tree.index();
-
-        let hero = index.by_id("hero").expect("id not indexed");
-        let hero_node = tree.node(hero);
-        match hero_node.kind() {
-            NodeKind::Element(data) => assert_eq!(data.name.local, local_name!("div")),
-            _ => panic!("expected element"),
-        }
-
-        let class_a = index.by_class("a").expect("class a missing");
-        assert!(class_a.contains(&hero));
-        let class_b = index.by_class("b").expect("class b missing");
-        assert!(class_b.contains(&hero));
-
-        let divs = index.by_tag("DIV").expect("div index missing");
-        assert!(divs.contains(&hero));
-    }
-
-    #[test]
-    fn siblings_and_parents_are_linked() {
-        let html = r#"<div><span></span><em></em></div>"#;
-        let tree = HtmlTree::parse(html);
-        let div_id = tree.index().by_tag("div").unwrap()[0];
-        let mut children = tree.children(div_id);
-        let span = children.next().expect("missing span");
-        let em = children.next().expect("missing em");
-        assert!(children.next().is_none());
-
-        assert_eq!(tree.node(span).parent(), Some(div_id));
-        assert_eq!(tree.node(em).parent(), Some(div_id));
-        assert_eq!(tree.node(span).next_sibling(), Some(em));
-        assert_eq!(tree.node(em).prev_sibling(), Some(span));
-
-        match tree.node(span).kind() {
-            NodeKind::Element(data) => assert_eq!(data.name.local, local_name!("span")),
-            _ => panic!("expected span"),
-        }
-        match tree.node(em).kind() {
-            NodeKind::Element(data) => assert_eq!(data.name.local, local_name!("em")),
-            _ => panic!("expected em"),
-        }
-    }
-
-    #[test]
-    fn class_index_splits_tokens() {
-        let html = r#"<div class="  a   b  "/>"#;
-        let tree = HtmlTree::parse(html);
-        let index = tree.index();
-        assert!(index.by_class("a").is_some());
-        assert!(index.by_class("b").is_some());
     }
 }

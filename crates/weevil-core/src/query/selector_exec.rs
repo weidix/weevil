@@ -224,7 +224,7 @@ where
     }
 }
 
-pub(crate) fn find_css(selector: &Selector, tree: &HtmlTree) -> Vec<NodeId> {
+pub(crate) fn find_selector(selector: &Selector, tree: &HtmlTree) -> Vec<NodeId> {
     let mut caches = SelectorCaches::default();
     let quirks = selector_quirks_mode(tree.quirks_mode());
     let mut context = MatchingContext::new(
@@ -300,13 +300,13 @@ mod tests {
     }
 
     #[test]
-    fn find_css_matches_attributes_and_classes() {
+    fn find_selector_matches_attributes_and_classes() {
         let tree = sample_tree();
         let second = tree.index().by_id("second").expect("missing second");
 
         let selector =
             Selector::parse("div#root[data-role=\"main\"] > span.hit").expect("selector parse");
-        let matches = find_css(&selector, &tree);
+        let matches = find_selector(&selector, &tree);
         assert_eq!(matches, vec![second]);
     }
 }

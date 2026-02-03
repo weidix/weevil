@@ -4,10 +4,13 @@ use std::convert::TryFrom;
 use std::fmt;
 
 pub use cssparser::ToCss;
-use cssparser::{BasicParseErrorKind, ParseErrorKind, Token};
+use cssparser::{BasicParseErrorKind, ParseErrorKind, SourceLocation, Token};
 use html5ever::{LocalName, Namespace};
 use precomputed_hash::PrecomputedHash;
 use selectors::parser::{self, ParseRelative, SelectorList, SelectorParseErrorKind};
+
+#[cfg(test)]
+mod tests;
 
 /// Wrapper around CSS selectors.
 ///
@@ -19,13 +22,13 @@ pub struct Selector {
 
 impl Selector {
     /// Parses a CSS selector group.
-    pub fn parse(selectors: &str) -> Result<Self, SelectorErrorKind<'_>> {
+    pub fn parse(selectors: &str) -> Result<Self, SelectorError> {
         let mut parser_input = cssparser::ParserInput::new(selectors);
         let mut parser = cssparser::Parser::new(&mut parser_input);
 
         SelectorList::parse(&Parser, &mut parser, ParseRelative::No)
             .map(|selectors| Self { selectors })
-            .map_err(SelectorErrorKind::from)
+            .map_err(|err| SelectorError::from_parse_error(selectors, err))
     }
 
     pub(crate) fn selector_list(&self) -> &SelectorList<Simple> {
@@ -43,7 +46,7 @@ impl ToCss for Selector {
 }
 
 impl<'i> TryFrom<&'i str> for Selector {
-    type Error = SelectorErrorKind<'i>;
+    type Error = SelectorError;
 
     fn try_from(s: &'i str) -> Result<Self, Self::Error> {
         Selector::parse(s)
@@ -178,11 +181,98 @@ impl ToCss for PseudoElement {
     }
 }
 
-/// Errors returned when parsing selectors.
+/// Location information for selector parsing errors.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SelectorLocation {
+    line: u32,
+    column: u32,
+}
+
+impl SelectorLocation {
+    /// Returns the 1-based line number.
+    pub fn line(self) -> u32 {
+        self.line
+    }
+
+    /// Returns the 1-based column number.
+    pub fn column(self) -> u32 {
+        self.column
+    }
+}
+
+impl From<SourceLocation> for SelectorLocation {
+    fn from(location: SourceLocation) -> Self {
+        Self {
+            line: location.line,
+            column: location.column,
+        }
+    }
+}
+
+/// Error returned when parsing CSS selectors.
 #[derive(Debug, Clone)]
-pub enum SelectorErrorKind<'a> {
+pub struct SelectorError {
+    kind: SelectorErrorKind,
+    location: Option<SelectorLocation>,
+    snippet: Option<String>,
+}
+
+impl SelectorError {
+    fn from_parse_error(
+        input: &str,
+        err: cssparser::ParseError<'_, SelectorParseErrorKind<'_>>,
+    ) -> Self {
+        let kind = SelectorErrorKind::from_parse_error_kind(err.kind);
+        let location = SelectorLocation::from(err.location);
+        let snippet = snippet_for_location(input, location);
+        Self {
+            kind,
+            location: Some(location),
+            snippet,
+        }
+    }
+
+    /// Returns the underlying error kind.
+    pub fn kind(&self) -> &SelectorErrorKind {
+        &self.kind
+    }
+
+    /// Returns the source location of the error, if available.
+    pub fn location(&self) -> Option<SelectorLocation> {
+        self.location
+    }
+
+    /// Returns a snippet of the selector input at the error location, if available.
+    pub fn snippet(&self) -> Option<&str> {
+        self.snippet.as_deref()
+    }
+}
+
+impl fmt::Display for SelectorError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.kind)?;
+        if let Some(location) = self.location {
+            write!(
+                f,
+                " at line {line}, column {column}",
+                line = location.line,
+                column = location.column
+            )?;
+        }
+        if let Some(snippet) = &self.snippet {
+            write!(f, "\n{snippet}")?;
+        }
+        Ok(())
+    }
+}
+
+impl std::error::Error for SelectorError {}
+
+/// Errors returned when parsing selectors.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SelectorErrorKind {
     /// A token was not expected.
-    UnexpectedToken(Token<'a>),
+    UnexpectedToken(String),
 
     /// End-of-line was unexpected.
     EndOfLine,
@@ -197,28 +287,30 @@ pub enum SelectorErrorKind<'a> {
     QualRuleInvalid,
 
     /// Expected a `::` for a pseudo-element.
-    ExpectedColonOnPseudoElement(Token<'a>),
+    ExpectedColonOnPseudoElement(String),
 
     /// Expected an identity for a pseudo-element.
-    ExpectedIdentityOnPseudoElement(Token<'a>),
+    ExpectedIdentityOnPseudoElement(String),
 
     /// Unexpected parser error.
-    UnexpectedSelectorParseError(SelectorParseErrorKind<'a>),
+    UnexpectedSelectorParseError(String),
 }
 
-impl<'a> From<cssparser::ParseError<'a, SelectorParseErrorKind<'a>>> for SelectorErrorKind<'a> {
-    fn from(original: cssparser::ParseError<'a, SelectorParseErrorKind<'a>>) -> Self {
-        match original.kind {
+impl SelectorErrorKind {
+    fn from_parse_error_kind(err: ParseErrorKind<SelectorParseErrorKind<'_>>) -> Self {
+        match err {
             ParseErrorKind::Basic(err) => SelectorErrorKind::from(err),
             ParseErrorKind::Custom(err) => SelectorErrorKind::from(err),
         }
     }
 }
 
-impl<'a> From<BasicParseErrorKind<'a>> for SelectorErrorKind<'a> {
-    fn from(err: BasicParseErrorKind<'a>) -> Self {
+impl From<BasicParseErrorKind<'_>> for SelectorErrorKind {
+    fn from(err: BasicParseErrorKind<'_>) -> Self {
         match err {
-            BasicParseErrorKind::UnexpectedToken(token) => Self::UnexpectedToken(token),
+            BasicParseErrorKind::UnexpectedToken(token) => {
+                Self::UnexpectedToken(render_token(&token))
+            }
             BasicParseErrorKind::EndOfInput => Self::EndOfLine,
             BasicParseErrorKind::AtRuleInvalid(rule) => Self::InvalidAtRule(rule.to_string()),
             BasicParseErrorKind::AtRuleBodyInvalid => Self::InvalidAtRuleBody,
@@ -227,54 +319,43 @@ impl<'a> From<BasicParseErrorKind<'a>> for SelectorErrorKind<'a> {
     }
 }
 
-impl<'a> From<SelectorParseErrorKind<'a>> for SelectorErrorKind<'a> {
-    fn from(err: SelectorParseErrorKind<'a>) -> Self {
+impl From<SelectorParseErrorKind<'_>> for SelectorErrorKind {
+    fn from(err: SelectorParseErrorKind<'_>) -> Self {
         match err {
             SelectorParseErrorKind::PseudoElementExpectedColon(token) => {
-                Self::ExpectedColonOnPseudoElement(token)
+                Self::ExpectedColonOnPseudoElement(render_token(&token))
             }
             SelectorParseErrorKind::PseudoElementExpectedIdent(token) => {
-                Self::ExpectedIdentityOnPseudoElement(token)
+                Self::ExpectedIdentityOnPseudoElement(render_token(&token))
             }
-            other => Self::UnexpectedSelectorParseError(other),
+            other => Self::UnexpectedSelectorParseError(format!("{other:?}")),
         }
     }
 }
 
-impl fmt::Display for SelectorErrorKind<'_> {
+impl fmt::Display for SelectorErrorKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::UnexpectedToken(token) => {
-                let rendered = render_token(token);
-                write!(f, "Token {rendered:?} was not expected")
-            }
+            Self::UnexpectedToken(token) => write!(f, "Token {token:?} was not expected"),
             Self::EndOfLine => write!(f, "Unexpected EOL"),
             Self::InvalidAtRule(rule) => write!(f, "Invalid @-rule {rule:?}"),
             Self::InvalidAtRuleBody => write!(f, "The body of an @-rule was invalid"),
             Self::QualRuleInvalid => write!(f, "The qualified name was invalid"),
-            Self::ExpectedColonOnPseudoElement(token) => {
-                let rendered = render_token(token);
-                write!(
-                    f,
-                    "Expected a ':' token for pseudoelement, got {rendered:?} instead"
-                )
-            }
-            Self::ExpectedIdentityOnPseudoElement(token) => {
-                let rendered = render_token(token);
-                write!(
-                    f,
-                    "Expected identity for pseudoelement, got {rendered:?} instead"
-                )
-            }
-            Self::UnexpectedSelectorParseError(err) => write!(
+            Self::ExpectedColonOnPseudoElement(token) => write!(
                 f,
-                "Unexpected error occurred. Please report this to the developer\n{err:#?}"
+                "Expected a ':' token for pseudoelement, got {token:?} instead"
             ),
+            Self::ExpectedIdentityOnPseudoElement(token) => write!(
+                f,
+                "Expected identity for pseudoelement, got {token:?} instead"
+            ),
+            Self::UnexpectedSelectorParseError(err) => {
+                write!(f, "Unexpected selector parser error: {err}")
+            }
         }
     }
 }
-
-impl std::error::Error for SelectorErrorKind<'_> {}
+impl std::error::Error for SelectorErrorKind {}
 
 fn render_token(token: &Token<'_>) -> String {
     match token {
@@ -357,135 +438,20 @@ fn render_int_unsigned(num: f32) -> String {
     format!("{num}")
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use cssparser::CowRcStr;
-    use std::convert::TryInto;
-
-    #[test]
-    fn parse_simple_selector() {
-        let selector = Selector::parse("h1.foo").unwrap();
-        assert_eq!(selector.to_css_string(), "h1.foo");
+fn snippet_for_location(input: &str, location: SelectorLocation) -> Option<String> {
+    let line_index = if location.line == 0 {
+        0
+    } else {
+        usize::try_from(location.line).ok()?.checked_sub(1)?
+    };
+    let line = input.lines().nth(line_index)?;
+    let column = usize::try_from(location.column).ok()?;
+    let mut caret_pos = column.saturating_sub(1);
+    if caret_pos > line.len() {
+        caret_pos = line.len();
     }
-
-    #[test]
-    fn parse_selector_group() {
-        let selector = Selector::parse("h1, h2, h3").unwrap();
-        let css = selector.to_css_string();
-        assert!(css.contains("h1"));
-        assert!(css.contains("h2"));
-        assert!(css.contains("h3"));
-    }
-
-    #[test]
-    fn selector_conversions() {
-        let s = "#testid.testclass";
-        let _sel: Selector = s.try_into().unwrap();
-
-        let s = s.to_owned();
-        let _sel: Selector = (*s).try_into().unwrap();
-    }
-
-    #[test]
-    fn invalid_selector_conversions() {
-        let s = "<failing selector>";
-        assert!(Selector::parse(s).is_err());
-    }
-
-    #[test]
-    fn has_is_where_selectors() {
-        let has = Selector::parse(":has(a)");
-        let is = Selector::parse(":is(a)");
-        let where_ = Selector::parse(":where(a)");
-
-        assert!(has.is_ok());
-        assert!(is.is_ok());
-        assert!(where_.is_ok());
-    }
-
-    #[test]
-    fn error_message_includes_token() {
-        let err = Selector::parse("div138293@!#@!!@#").unwrap_err();
-        assert_eq!(err.to_string(), "Token \"@\" was not expected");
-    }
-
-    #[test]
-    fn css_string_and_local_name_rendering() {
-        let css = CssString::from("a b").to_css_string();
-        assert!(css.starts_with('\"'));
-        assert!(css.ends_with('\"'));
-        assert!(css.contains("a b"));
-
-        let name = CssLocalName::from("div");
-        assert_eq!(name.to_css_string(), "div");
-    }
-
-    #[test]
-    fn render_token_numbers_and_units() {
-        let token = Token::Number {
-            has_sign: true,
-            value: 3.0,
-            int_value: Some(3),
-        };
-        assert_eq!(render_token(&token), "+3");
-
-        let token = Token::Percentage {
-            has_sign: true,
-            unit_value: 1.0,
-            int_value: Some(100),
-        };
-        assert_eq!(render_token(&token), "+1%");
-
-        let token = Token::Dimension {
-            has_sign: false,
-            value: 12.0,
-            int_value: Some(12),
-            unit: CowRcStr::from("px"),
-        };
-        assert_eq!(render_token(&token), "12px");
-    }
-
-    #[test]
-    fn render_token_misc_variants() {
-        let token = Token::Ident(CowRcStr::from("title"));
-        assert_eq!(render_token(&token), "title");
-
-        let token = Token::AtKeyword(CowRcStr::from("media"));
-        assert_eq!(render_token(&token), "@media");
-
-        let token = Token::Hash(CowRcStr::from("hero"));
-        assert_eq!(render_token(&token), "#hero");
-
-        let token = Token::QuotedString(CowRcStr::from("hi"));
-        assert_eq!(render_token(&token), "\"hi\"");
-
-        let token = Token::Comment("note");
-        assert_eq!(render_token(&token), "/* note */");
-
-        let token = Token::Function(CowRcStr::from("rgb"));
-        assert_eq!(render_token(&token), "rgb()");
-    }
-
-    #[test]
-    fn render_int_helpers() {
-        assert_eq!(render_int_signed(1.0), "+1");
-        assert_eq!(render_int_signed(0.0), "-0");
-        assert_eq!(render_int_unsigned(2.0), "2");
-    }
-
-    #[test]
-    fn selector_error_messages_cover_variants() {
-        let err = SelectorErrorKind::EndOfLine.to_string();
-        assert!(err.contains("EOL"));
-
-        let err = SelectorErrorKind::InvalidAtRule("media".to_string()).to_string();
-        assert!(err.contains("Invalid @-rule"));
-
-        let err = SelectorErrorKind::InvalidAtRuleBody.to_string();
-        assert!(err.contains("body of an @-rule"));
-
-        let err = SelectorErrorKind::QualRuleInvalid.to_string();
-        assert!(err.contains("qualified name"));
-    }
+    let mut caret = String::new();
+    caret.push_str(&" ".repeat(caret_pos));
+    caret.push('^');
+    Some(format!("{line}\n{caret}"))
 }

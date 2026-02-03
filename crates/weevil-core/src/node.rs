@@ -74,6 +74,19 @@ impl Node {
     pub fn kind(&self) -> &NodeKind {
         &self.kind
     }
+
+    /// Returns the attribute value if this is an element node.
+    pub fn attr(&self, name: &str) -> Option<&str> {
+        self.kind.as_element()?.attr_value(name)
+    }
+
+    /// Returns the text contents if this is a text node.
+    pub fn text(&self) -> Option<&str> {
+        match &self.kind {
+            NodeKind::Text(text) => Some(text.as_ref()),
+            _ => None,
+        }
+    }
 }
 
 /// Node contents.
@@ -194,5 +207,22 @@ mod tests {
 
         let mixed = normalize_tag_name("DiV");
         assert!(matches!(mixed, Cow::Owned(ref val) if val == "div"));
+    }
+
+    #[test]
+    fn node_attr_and_text_helpers() {
+        let data = ElementData {
+            name: QualName::new(None, ns!(html), local_name!("div")),
+            attrs: vec![make_attr("id", "Hero")],
+            template_contents: None,
+            mathml_annotation_xml_integration_point: false,
+        };
+        let element_node = Node::new(NodeKind::Element(data));
+        assert_eq!(element_node.attr("id"), Some("Hero"));
+        assert_eq!(element_node.attr("class"), None);
+
+        let text_node = Node::new(NodeKind::Text(StrTendril::from("hi")));
+        assert_eq!(text_node.text(), Some("hi"));
+        assert_eq!(text_node.attr("id"), None);
     }
 }
