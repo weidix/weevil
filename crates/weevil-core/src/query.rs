@@ -3,95 +3,14 @@
 use std::fmt;
 
 use crate::html::{HtmlTree, NodeId, NodeKind};
-use crate::selector::{Selector, SelectorError};
-use crate::xpath::{XPath, XPathError};
+use crate::selector::Selector;
+use crate::xpath::XPath;
 
 mod selector_exec;
 mod xpath_exec;
 
 use selector_exec::find_selector_in;
 use xpath_exec::find_xpath_in;
-
-/// Supported query languages.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum QueryKind {
-    Selector,
-    XPath,
-}
-
-/// Unified query AST for CSS selectors and XPath expressions.
-#[derive(Debug, Clone)]
-pub enum Query {
-    Selector(Selector),
-    XPath(XPath),
-}
-
-impl Query {
-    /// Parses a query using the requested language.
-    pub fn parse(input: &str, kind: QueryKind) -> Result<Self, QueryError> {
-        match kind {
-            QueryKind::Selector => Selector::parse(input)
-                .map(Query::Selector)
-                .map_err(QueryError::Selector),
-            QueryKind::XPath => XPath::parse(input)
-                .map(Query::XPath)
-                .map_err(QueryError::XPath),
-        }
-    }
-
-    /// Executes the query against a parsed HTML tree or subtree.
-    pub fn find<C>(&self, context: C) -> Result<Vec<NodeId>, QueryExecError>
-    where
-        C: QueryContext,
-    {
-        match self {
-            Query::Selector(selector) => selector.find(context),
-            Query::XPath(xpath) => xpath.find(context),
-        }
-    }
-
-    /// Returns the first matching node, if any.
-    pub fn find_first<C>(&self, context: C) -> Result<Option<NodeId>, QueryExecError>
-    where
-        C: QueryContext,
-    {
-        QueryExecutor::find_first(self, context)
-    }
-
-    /// Alias for `find_first`.
-    pub fn select_one<C>(&self, context: C) -> Result<Option<NodeId>, QueryExecError>
-    where
-        C: QueryContext,
-    {
-        self.find_first(context)
-    }
-
-    /// Alias for `find_first`.
-    pub fn first_match<C>(&self, context: C) -> Result<Option<NodeId>, QueryExecError>
-    where
-        C: QueryContext,
-    {
-        self.find_first(context)
-    }
-}
-
-/// Unified parse error for CSS selectors and XPath expressions.
-#[derive(Debug, Clone)]
-pub enum QueryError {
-    Selector(SelectorError),
-    XPath(XPathError),
-}
-
-impl fmt::Display for QueryError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            QueryError::Selector(err) => write!(f, "{err}"),
-            QueryError::XPath(err) => write!(f, "{err}"),
-        }
-    }
-}
-
-impl std::error::Error for QueryError {}
 
 /// Query execution context, either the whole tree or a subtree.
 pub trait QueryContext {
@@ -138,7 +57,7 @@ impl QueryContext for (&HtmlTree, NodeId) {
 }
 
 /// Unified query execution interface for CSS selectors and XPath expressions.
-pub trait QueryExecutor {
+pub trait Query {
     /// Returns all nodes matching the query.
     fn find<C>(&self, context: C) -> Result<Vec<NodeId>, QueryExecError>
     where
@@ -150,6 +69,22 @@ pub trait QueryExecutor {
         C: QueryContext,
     {
         Ok(self.find(context)?.into_iter().next())
+    }
+
+    /// Alias for `find_first`.
+    fn select_one<C>(&self, context: C) -> Result<Option<NodeId>, QueryExecError>
+    where
+        C: QueryContext,
+    {
+        self.find_first(context)
+    }
+
+    /// Alias for `find_first`.
+    fn first_match<C>(&self, context: C) -> Result<Option<NodeId>, QueryExecError>
+    where
+        C: QueryContext,
+    {
+        self.find_first(context)
     }
 }
 
@@ -235,7 +170,7 @@ impl fmt::Display for QueryExecError {
 
 impl std::error::Error for QueryExecError {}
 
-impl QueryExecutor for Selector {
+impl Query for Selector {
     fn find<C>(&self, context: C) -> Result<Vec<NodeId>, QueryExecError>
     where
         C: QueryContext,
@@ -249,7 +184,7 @@ impl QueryExecutor for Selector {
     }
 }
 
-impl QueryExecutor for XPath {
+impl Query for XPath {
     fn find<C>(&self, context: C) -> Result<Vec<NodeId>, QueryExecError>
     where
         C: QueryContext,
@@ -258,22 +193,21 @@ impl QueryExecutor for XPath {
     }
 }
 
-impl QueryExecutor for Query {
-    fn find<C>(&self, context: C) -> Result<Vec<NodeId>, QueryExecError>
+impl Selector {
+    /// Returns all matching nodes.
+    pub fn find<C>(&self, context: C) -> Result<Vec<NodeId>, QueryExecError>
     where
         C: QueryContext,
     {
         Query::find(self, context)
     }
-}
 
-impl Selector {
     /// Returns the first matching node, if any.
     pub fn find_first<C>(&self, context: C) -> Result<Option<NodeId>, QueryExecError>
     where
         C: QueryContext,
     {
-        QueryExecutor::find_first(self, context)
+        Query::find_first(self, context)
     }
 
     /// Alias for `find_first`.
@@ -294,12 +228,20 @@ impl Selector {
 }
 
 impl XPath {
+    /// Returns all matching nodes.
+    pub fn find<C>(&self, context: C) -> Result<Vec<NodeId>, QueryExecError>
+    where
+        C: QueryContext,
+    {
+        Query::find(self, context)
+    }
+
     /// Returns the first matching node, if any.
     pub fn find_first<C>(&self, context: C) -> Result<Option<NodeId>, QueryExecError>
     where
         C: QueryContext,
     {
-        QueryExecutor::find_first(self, context)
+        Query::find_first(self, context)
     }
 
     /// Alias for `find_first`.
@@ -322,41 +264,9 @@ impl XPath {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cssparser::ToCss;
 
     #[test]
-    fn parse_query_selector() {
-        let query = Query::parse("h1.title", QueryKind::Selector).unwrap();
-        match query {
-            Query::Selector(selector) => {
-                assert_eq!(selector.to_css_string(), "h1.title");
-            }
-            Query::XPath(_) => panic!("expected selector query"),
-        }
-    }
-
-    #[test]
-    fn parse_query_xpath() {
-        let query = Query::parse("/foo", QueryKind::XPath).unwrap();
-        match query {
-            Query::XPath(_) => {}
-            Query::Selector(_) => panic!("expected xpath query"),
-        }
-    }
-
-    #[test]
-    fn parse_query_xpath_error() {
-        let err = Query::parse("foo:bar", QueryKind::XPath).unwrap_err();
-        match err {
-            QueryError::XPath(inner) => {
-                assert!(inner.to_string().contains("foo"));
-            }
-            QueryError::Selector(_) => panic!("expected xpath error"),
-        }
-    }
-
-    #[test]
-    fn query_find_selector_and_xpath() {
+    fn find_selector_and_xpath() {
         let html = r#"<div id="hero" class="a b"><span class="b"></span><span></span></div>"#;
         let tree = HtmlTree::parse(html);
         let hero = tree.index().by_id("hero").expect("missing hero id");
@@ -365,10 +275,6 @@ mod tests {
 
         let selector = Selector::parse("div#hero > span.b").unwrap();
         let matches = selector.find(&tree).unwrap();
-        assert_eq!(matches, vec![first_span]);
-
-        let query = Query::Selector(selector);
-        let matches = query.find(&tree).unwrap();
         assert_eq!(matches, vec![first_span]);
 
         let xpath = XPath::parse("/html/body/div/span[1]").unwrap();
@@ -418,10 +324,6 @@ mod tests {
 
         let xpath = XPath::parse("descendant::span").unwrap();
         let matches = xpath.find((&tree, outer)).unwrap();
-        assert_eq!(matches, vec![inner]);
-
-        let query = Query::XPath(xpath);
-        let matches = query.find((&tree, outer)).unwrap();
         assert_eq!(matches, vec![inner]);
     }
 }

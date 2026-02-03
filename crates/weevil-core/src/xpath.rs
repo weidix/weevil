@@ -6,7 +6,7 @@ use xee_xpath_ast::{Namespaces, ParserError, VariableNames, ast};
 
 /// Wrapper around a parsed XPath expression.
 #[derive(Debug, Clone)]
-pub struct XPath(pub ast::XPath);
+pub struct XPath(pub(crate) ast::XPath);
 
 impl XPath {
     /// Parses an XPath expression using default namespaces and variable names.

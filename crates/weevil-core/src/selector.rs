@@ -3,7 +3,7 @@
 use std::convert::TryFrom;
 use std::fmt;
 
-pub use cssparser::ToCss;
+use cssparser::ToCss;
 use cssparser::{BasicParseErrorKind, ParseErrorKind, SourceLocation, Token};
 use html5ever::{LocalName, Namespace};
 use precomputed_hash::PrecomputedHash;
@@ -55,7 +55,7 @@ impl<'i> TryFrom<&'i str> for Selector {
 
 /// An implementation of `Parser` for `selectors`.
 #[derive(Clone, Copy, Debug)]
-pub struct Parser;
+struct Parser;
 
 impl<'i> parser::Parser<'i> for Parser {
     type Impl = Simple;
@@ -72,7 +72,7 @@ impl<'i> parser::Parser<'i> for Parser {
 
 /// A simple implementation of `SelectorImpl` with no pseudo-classes or pseudo-elements.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Simple;
+pub(crate) struct Simple;
 
 impl parser::SelectorImpl for Simple {
     type AttrValue = CssString;
@@ -91,7 +91,7 @@ impl parser::SelectorImpl for Simple {
 
 /// Wraps [`String`] so that it can be used with [`selectors`].
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CssString(pub String);
+pub(crate) struct CssString(pub(crate) String);
 
 impl<'a> From<&'a str> for CssString {
     fn from(val: &'a str) -> Self {
@@ -116,7 +116,7 @@ impl ToCss for CssString {
 
 /// Wraps [`LocalName`] so that it can be used with [`selectors`].
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
-pub struct CssLocalName(pub LocalName);
+pub(crate) struct CssLocalName(pub(crate) LocalName);
 
 impl<'a> From<&'a str> for CssLocalName {
     fn from(val: &'a str) -> Self {
@@ -141,7 +141,7 @@ impl PrecomputedHash for CssLocalName {
 
 /// Non tree-structural pseudo-class.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum NonTSPseudoClass {}
+pub(crate) enum NonTSPseudoClass {}
 
 impl parser::NonTSPseudoClass for NonTSPseudoClass {
     type Impl = Simple;
@@ -166,7 +166,7 @@ impl ToCss for NonTSPseudoClass {
 
 /// CSS pseudo-element.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PseudoElement {}
+pub(crate) enum PseudoElement {}
 
 impl parser::PseudoElement for PseudoElement {
     type Impl = Simple;

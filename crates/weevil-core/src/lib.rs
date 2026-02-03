@@ -2,12 +2,12 @@
 //!
 //! # Quick start
 //! ```rust,no_run
-//! use weevil_core::{HtmlTree, Query, QueryKind};
+//! use weevil_core::{HtmlTree, Selector};
 //!
 //! let html = r#"<div id="hero"><span class="title">Hello</span></div>"#;
 //! let tree = HtmlTree::parse_checked(html)?;
-//! let query = Query::parse("div#hero > span.title", QueryKind::Selector)?;
-//! let _first = query.select_one(&tree)?;
+//! let selector = Selector::parse("div#hero > span.title")?;
+//! let _first = selector.select_one(&tree)?;
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 //!
@@ -25,6 +25,6 @@ pub use html::{
     Subtree,
 };
 pub use node::{ElementData, Node, NodeId, NodeKind};
-pub use query::{Query, QueryError, QueryExecError, QueryExecFeature, QueryExecutor, QueryKind};
+pub use query::{Query, QueryContext, QueryExecError, QueryExecFeature};
 pub use selector::{Selector, SelectorError, SelectorErrorKind, SelectorLocation};
 pub use xpath::{XPath, XPathError};

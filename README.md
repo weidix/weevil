@@ -11,13 +11,13 @@ actual scraping behavior.
 ### Quick start
 
 ```rust
-use weevil_core::{HtmlTree, Query, QueryKind};
+use weevil_core::{HtmlTree, Selector};
 
 let html = r#"<div id="hero"><span class="title">Hello</span></div>"#;
 let tree = HtmlTree::parse_checked(html)?;
 
-let query = Query::parse("div#hero > span.title", QueryKind::Selector)?;
-if let Some(node_id) = query.select_one(&tree)? {
+let selector = Selector::parse("div#hero > span.title")?;
+if let Some(node_id) = selector.select_one(&tree)? {
     let text = tree.text_content(node_id);
     println!("{text}");
 }
@@ -53,7 +53,7 @@ println!("errors: {}", output.errors.len());
   - `HtmlTree::text_content(id)` aggregates descendant text nodes.
   - `HtmlTree::attr(id, name)` returns element attributes.
   - `HtmlTree::descendants(id)` and `HtmlTree::subtree(id)` iterate in document order.
-  - `Query::select_one` / `Selector::first_match` return the first match.
+  - `Selector::select_one` / `XPath::select_one` return the first match.
 
 ### Supported CSS subset
 
