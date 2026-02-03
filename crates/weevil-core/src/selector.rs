@@ -27,6 +27,10 @@ impl Selector {
             .map(|selectors| Self { selectors })
             .map_err(SelectorErrorKind::from)
     }
+
+    pub(crate) fn selector_list(&self) -> &SelectorList<Simple> {
+        &self.selectors
+    }
 }
 
 impl ToCss for Selector {

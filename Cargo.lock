@@ -1332,6 +1332,7 @@ dependencies = [
  "rustc-hash",
  "selectors",
  "xee-xpath-ast",
+ "xot",
 ]
 
 [[package]]
