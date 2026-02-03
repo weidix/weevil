@@ -1326,7 +1326,9 @@ dependencies = [
 name = "weevil-core"
 version = "0.1.0"
 dependencies = [
+ "cssparser",
  "html5ever",
+ "precomputed-hash",
  "selectors",
  "xee-xpath-ast",
 ]
