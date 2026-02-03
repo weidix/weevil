@@ -1329,6 +1329,7 @@ dependencies = [
  "cssparser",
  "html5ever",
  "precomputed-hash",
+ "rustc-hash",
  "selectors",
  "xee-xpath-ast",
 ]
