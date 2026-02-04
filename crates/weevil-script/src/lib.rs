@@ -33,6 +33,8 @@
 //! }
 //! # Ok(())
 //! # }
+//! # #[cfg(not(feature = "host"))]
+//! # fn main() {}
 //! ```
 //!
 //! # Guest usage
