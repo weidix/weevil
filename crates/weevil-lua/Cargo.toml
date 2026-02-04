@@ -2,3 +2,6 @@
 name = "weevil-lua"
 version.workspace = true
 edition.workspace = true
+
+[dependencies]
+mlua = { version = "0.11", features = ["lua55", "vendored", "async", "send"] }
