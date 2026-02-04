@@ -44,6 +44,12 @@ impl ScrapeContext {
     }
 }
 
+impl Default for ScrapeContext {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct HttpRequest {
     pub method: String,
@@ -91,6 +97,12 @@ impl ScrapeResponse {
             records: Vec::new(),
             warnings: Vec::new(),
         }
+    }
+}
+
+impl Default for ScrapeResponse {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

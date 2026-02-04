@@ -102,8 +102,7 @@ pub fn alloc(len: u32) -> u32 {
             Ok(len) => len,
             Err(_) => return 0,
         };
-        let mut buf = Vec::with_capacity(len);
-        buf.resize(len, 0);
+        let mut buf = vec![0_u8; len];
         let ptr = buf.as_mut_ptr();
         std::mem::forget(buf);
         ptr as u32
@@ -254,10 +253,7 @@ fn encode_response<T: Serialize>(response: &AbiResponse<T>) -> u64 {
                 format!("serialize response failed: {err}"),
                 "serialize_failed",
             ));
-            match serde_json::to_vec(&fallback) {
-                Ok(bytes) => bytes,
-                Err(_) => Vec::new(),
-            }
+            serde_json::to_vec(&fallback).unwrap_or_default()
         }
     };
     write_bytes(&bytes)

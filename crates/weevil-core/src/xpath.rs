@@ -21,7 +21,10 @@ impl XPath {
 
 /// Error returned when parsing XPath expressions.
 #[derive(Debug, Clone)]
-pub struct XPathError {
+pub struct XPathError(Box<XPathErrorInner>);
+
+#[derive(Debug, Clone)]
+struct XPathErrorInner {
     kind: ParserError,
     span: ast::Span,
     snippet: String,
@@ -31,36 +34,36 @@ impl XPathError {
     fn new(kind: ParserError, input: &str) -> Self {
         let span = kind.span();
         let snippet = snippet_for_span(input, span);
-        Self {
+        Self(Box::new(XPathErrorInner {
             kind,
             span,
             snippet,
-        }
+        }))
     }
 
     /// Returns the underlying parser error kind.
     pub fn kind(&self) -> &ParserError {
-        &self.kind
+        &self.0.kind
     }
 
     /// Returns the span where the error occurred.
     pub fn span(&self) -> ast::Span {
-        self.span
+        self.0.span
     }
 
     /// Returns a snippet of the input at the error span.
     pub fn snippet(&self) -> &str {
-        &self.snippet
+        &self.0.snippet
     }
 }
 
 impl fmt::Display for XPathError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let start = self.span.start;
-        let end = self.span.end;
-        let snippet = &self.snippet;
+        let start = self.0.span.start;
+        let end = self.0.span.end;
+        let snippet = &self.0.snippet;
 
-        match &self.kind {
+        match &self.0.kind {
             ParserError::ExpectedFound { .. } => {
                 write!(f, "Unexpected token at {start}..{end}: {snippet:?}")
             }

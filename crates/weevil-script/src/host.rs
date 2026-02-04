@@ -395,10 +395,7 @@ fn encode_response<T: Serialize>(
                 format!("serialize response failed: {err}"),
                 "serialize_failed",
             ));
-            match serde_json::to_vec(&fallback) {
-                Ok(bytes) => bytes,
-                Err(_) => Vec::new(),
-            }
+            serde_json::to_vec(&fallback).unwrap_or_default()
         }
     };
     match write_guest_bytes(caller, &bytes) {

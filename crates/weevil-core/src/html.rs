@@ -174,15 +174,18 @@ impl HtmlTreeBuilder {
     }
 
     #[inline]
-    fn nodes_mut(&self) -> &mut Vec<Node> {
-        unsafe { &mut *self.nodes.get() }
+    fn with_nodes_mut<R>(&self, f: impl FnOnce(&mut Vec<Node>) -> R) -> R {
+        // Safety: TreeSink requires &self methods; UnsafeCell provides interior mutability.
+        let nodes = unsafe { &mut *self.nodes.get() };
+        f(nodes)
     }
 
     fn push_node(&self, kind: NodeKind) -> NodeId {
-        let nodes = self.nodes_mut();
-        let id = NodeId::new(nodes.len());
-        nodes.push(Node::new(kind));
-        id
+        self.with_nodes_mut(|nodes| {
+            let id = NodeId::new(nodes.len());
+            nodes.push(Node::new(kind));
+            id
+        })
     }
 
     fn index_element(&self, id: NodeId) {
@@ -271,8 +274,9 @@ impl TreeSink for HtmlTreeBuilder {
     }
 
     fn append(&self, parent: &Self::Handle, child: NodeOrText<Self::Handle>) {
-        let nodes = self.nodes_mut();
-        append_child(nodes, *parent, child);
+        self.with_nodes_mut(|nodes| {
+            append_child(nodes, *parent, child);
+        });
     }
 
     fn append_based_on_parent_node(
@@ -281,12 +285,13 @@ impl TreeSink for HtmlTreeBuilder {
         prev_element: &Self::Handle,
         child: NodeOrText<Self::Handle>,
     ) {
-        let nodes = self.nodes_mut();
-        if nodes[element.index()].parent.is_some() {
-            append_before_sibling(nodes, *element, child);
-        } else {
-            append_child(nodes, *prev_element, child);
-        }
+        self.with_nodes_mut(|nodes| {
+            if nodes[element.index()].parent.is_some() {
+                append_before_sibling(nodes, *element, child);
+            } else {
+                append_child(nodes, *prev_element, child);
+            }
+        });
     }
 
     fn append_doctype_to_document(
@@ -295,57 +300,61 @@ impl TreeSink for HtmlTreeBuilder {
         public_id: StrTendril,
         system_id: StrTendril,
     ) {
-        let nodes = self.nodes_mut();
-        let doctype = push_node(
-            nodes,
-            NodeKind::Doctype {
-                name,
-                public_id,
-                system_id,
-            },
-        );
-        append_node(nodes, self.document, doctype);
+        self.with_nodes_mut(|nodes| {
+            let doctype = push_node(
+                nodes,
+                NodeKind::Doctype {
+                    name,
+                    public_id,
+                    system_id,
+                },
+            );
+            append_node(nodes, self.document, doctype);
+        });
     }
 
     fn add_attrs_if_missing(&self, target: &Self::Handle, attrs: Vec<Attribute>) {
-        let nodes = self.nodes_mut();
-        let node = &mut nodes[target.index()];
-        let element = match &mut node.kind {
-            NodeKind::Element(data) => data,
-            _ => panic!("not an element"),
-        };
+        self.with_nodes_mut(|nodes| {
+            let node = &mut nodes[target.index()];
+            let element = match &mut node.kind {
+                NodeKind::Element(data) => data,
+                _ => panic!("not an element"),
+            };
 
-        if attrs.is_empty() {
-            return;
-        }
-
-        let mut index = self.index.borrow_mut();
-        for attr in attrs {
-            if element
-                .attrs
-                .iter()
-                .any(|existing| existing.name == attr.name)
-            {
-                continue;
+            if attrs.is_empty() {
+                return;
             }
-            index_attr(&mut index, *target, &attr);
-            element.attrs.push(attr);
-        }
+
+            let mut index = self.index.borrow_mut();
+            for attr in attrs {
+                if element
+                    .attrs
+                    .iter()
+                    .any(|existing| existing.name == attr.name)
+                {
+                    continue;
+                }
+                index_attr(&mut index, *target, &attr);
+                element.attrs.push(attr);
+            }
+        });
     }
 
     fn remove_from_parent(&self, target: &Self::Handle) {
-        let nodes = self.nodes_mut();
-        detach_node(nodes, *target);
+        self.with_nodes_mut(|nodes| {
+            detach_node(nodes, *target);
+        });
     }
 
     fn reparent_children(&self, node: &Self::Handle, new_parent: &Self::Handle) {
-        let nodes = self.nodes_mut();
-        let mut child = nodes[node.index()].first_child;
-        while let Some(child_id) = child {
-            let next = nodes[child_id.index()].next_sibling;
-            append_node(nodes, *new_parent, child_id);
-            child = next;
-        }
+        self.with_nodes_mut(|nodes| {
+            let mut child = nodes[node.index()].first_child;
+            while let Some(child_id) = child {
+                let next = nodes[child_id.index()].next_sibling;
+                append_node(nodes, *new_parent, child_id);
+                child = next;
+            }
+        });
     }
 
     fn set_quirks_mode(&self, mode: QuirksMode) {
@@ -365,8 +374,9 @@ impl TreeSink for HtmlTreeBuilder {
     }
 
     fn append_before_sibling(&self, sibling: &Self::Handle, child: NodeOrText<Self::Handle>) {
-        let nodes = self.nodes_mut();
-        append_before_sibling(nodes, *sibling, child);
+        self.with_nodes_mut(|nodes| {
+            append_before_sibling(nodes, *sibling, child);
+        });
     }
 
     fn is_mathml_annotation_xml_integration_point(&self, handle: &Self::Handle) -> bool {
@@ -413,7 +423,7 @@ fn append_before_sibling(nodes: &mut Vec<Node>, sibling: NodeId, child: NodeOrTe
 }
 
 fn append_text_to_previous(
-    nodes: &mut Vec<Node>,
+    nodes: &mut [Node],
     previous: Option<NodeId>,
     text: &StrTendril,
 ) -> bool {
@@ -430,7 +440,7 @@ fn append_text_to_previous(
     }
 }
 
-fn append_node(nodes: &mut Vec<Node>, parent: NodeId, child: NodeId) {
+fn append_node(nodes: &mut [Node], parent: NodeId, child: NodeId) {
     detach_node(nodes, child);
 
     let parent_idx = parent.index();
@@ -449,7 +459,7 @@ fn append_node(nodes: &mut Vec<Node>, parent: NodeId, child: NodeId) {
     nodes[parent_idx].last_child = Some(child);
 }
 
-fn insert_before(nodes: &mut Vec<Node>, sibling: NodeId, new_node: NodeId) {
+fn insert_before(nodes: &mut [Node], sibling: NodeId, new_node: NodeId) {
     detach_node(nodes, new_node);
 
     let sibling_idx = sibling.index();
@@ -470,7 +480,7 @@ fn insert_before(nodes: &mut Vec<Node>, sibling: NodeId, new_node: NodeId) {
     nodes[sibling_idx].prev_sibling = Some(new_node);
 }
 
-fn detach_node(nodes: &mut Vec<Node>, target: NodeId) {
+fn detach_node(nodes: &mut [Node], target: NodeId) {
     let idx = target.index();
     let parent = nodes[idx].parent;
     let prev = nodes[idx].prev_sibling;
