@@ -2,25 +2,3 @@
 name = "weevil-script"
 version.workspace = true
 edition.workspace = true
-
-[features]
-default = []
-host = ["dep:globset", "dep:ureq", "dep:wasmtime"]
-guest = []
-
-[dependencies]
-weevil-core = { path = "../weevil-core" }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-
-[dependencies.globset]
-version = "0.4"
-optional = true
-
-[dependencies.ureq]
-version = "3"
-optional = true
-
-[dependencies.wasmtime]
-version = "41"
-optional = true
