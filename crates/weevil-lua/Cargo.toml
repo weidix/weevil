@@ -3,5 +3,13 @@ name = "weevil-lua"
 version.workspace = true
 edition.workspace = true
 
+[features]
+default = ["async"]
+async = ["mlua/async"]
+
 [dependencies]
-mlua = { version = "0.11", features = ["lua55", "vendored", "async", "send"] }
+mlua = { version = "0.11", features = ["lua55", "vendored"] }
+reqwest = { version = "0.13", default-features = false, features = ["blocking", "rustls"] }
+thiserror = "2"
+url = "2"
+weevil-core = { path = "../weevil-core" }

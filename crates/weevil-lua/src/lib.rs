@@ -1,1 +1,10 @@
-//! Placeholder crate for the scripting runtime.
+//! Lua runtime bindings for weevil.
+
+mod error;
+mod http;
+mod lua;
+mod plugin;
+
+pub use crate::error::LuaPluginError;
+pub use crate::http::{HttpClient, TrustedUrl};
+pub use crate::plugin::{LuaPlugin, LuaPluginSpec, check_script};

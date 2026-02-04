@@ -1,0 +1,176 @@
+use std::fs;
+use std::path::Path;
+use std::sync::Arc;
+
+use mlua::{IntoLuaMulti, Lua, RegistryKey, Value};
+
+use crate::error::LuaPluginError;
+use crate::http::{HttpClient, TrustedUrl};
+use crate::lua::{HttpMode, install_module, set_http};
+
+#[derive(Debug, Clone)]
+pub struct LuaPluginSpec {
+    trusted_urls: Vec<TrustedUrl>,
+    has_run: bool,
+}
+
+impl LuaPluginSpec {
+    pub fn trusted_urls(&self) -> &[TrustedUrl] {
+        &self.trusted_urls
+    }
+
+    pub fn has_run(&self) -> bool {
+        self.has_run
+    }
+}
+
+pub struct LuaPlugin {
+    lua: Lua,
+    run_key: RegistryKey,
+    trusted_urls: Vec<TrustedUrl>,
+}
+
+impl LuaPlugin {
+    pub fn from_str(script: &str) -> Result<Self, LuaPluginError> {
+        let lua = Lua::new();
+        install_module(&lua, HttpMode::Disabled)?;
+        let table = eval_script_table(&lua, script)?;
+        let trusted_urls = parse_trusted_urls(&table)?;
+        let run = parse_run(&table)?;
+        let run_key = lua.create_registry_value(run)?;
+        let http = Arc::new(HttpClient::new(trusted_urls.clone())?);
+        set_http(&lua, HttpMode::Enabled(http))?;
+        Ok(Self {
+            lua,
+            run_key,
+            trusted_urls,
+        })
+    }
+
+    pub fn from_file(path: impl AsRef<Path>) -> Result<Self, LuaPluginError> {
+        let path = path.as_ref();
+        let contents = fs::read_to_string(path).map_err(|err| LuaPluginError::ScriptIo {
+            path: path.to_path_buf(),
+            source: err,
+        })?;
+        Self::from_str(&contents)
+    }
+
+    pub fn check(script: &str) -> Result<LuaPluginSpec, LuaPluginError> {
+        let lua = Lua::new();
+        install_module(&lua, HttpMode::Disabled)?;
+        let table = eval_script_table(&lua, script)?;
+        let trusted_urls = parse_trusted_urls(&table)?;
+        let has_run = table.contains_key("run")?;
+        Ok(LuaPluginSpec {
+            trusted_urls,
+            has_run,
+        })
+    }
+
+    pub fn check_file(path: impl AsRef<Path>) -> Result<LuaPluginSpec, LuaPluginError> {
+        let path = path.as_ref();
+        let contents = fs::read_to_string(path).map_err(|err| LuaPluginError::ScriptIo {
+            path: path.to_path_buf(),
+            source: err,
+        })?;
+        Self::check(&contents)
+    }
+
+    pub fn trusted_urls(&self) -> &[TrustedUrl] {
+        &self.trusted_urls
+    }
+
+    pub fn lua(&self) -> &Lua {
+        &self.lua
+    }
+
+    pub fn call<A>(&self, args: A) -> Result<Option<Value>, LuaPluginError>
+    where
+        A: IntoLuaMulti,
+    {
+        let run = self.lua.registry_value::<mlua::Function>(&self.run_key)?;
+        let output = run.call::<Option<Value>>(args)?;
+        Ok(output)
+    }
+
+    #[cfg(feature = "async")]
+    pub async fn call_async<A>(&self, args: A) -> Result<Option<Value>, LuaPluginError>
+    where
+        A: IntoLuaMulti,
+    {
+        let run = self.lua.registry_value::<mlua::Function>(&self.run_key)?;
+        let output = run.call_async::<Option<Value>>(args).await?;
+        Ok(output)
+    }
+}
+
+pub fn check_script(script: &str) -> Result<LuaPluginSpec, LuaPluginError> {
+    LuaPlugin::check(script)
+}
+
+fn eval_script_table(lua: &Lua, script: &str) -> Result<mlua::Table, LuaPluginError> {
+    let value: Value = lua.load(script).eval()?;
+    match value {
+        Value::Nil => Err(LuaPluginError::ScriptReturnMissing),
+        Value::Table(table) => Ok(table),
+        other => Err(LuaPluginError::ScriptReturnNotTable {
+            kind: value_kind(&other).to_string(),
+        }),
+    }
+}
+
+fn parse_trusted_urls(table: &mlua::Table) -> Result<Vec<TrustedUrl>, LuaPluginError> {
+    let value: Value = table
+        .get("trusted_urls")
+        .map_err(|_| LuaPluginError::MissingTrustedUrls)?;
+    let list = match value {
+        Value::Table(list) => list,
+        other => {
+            return Err(LuaPluginError::InvalidTrustedUrlsType {
+                kind: value_kind(&other).to_string(),
+            });
+        }
+    };
+    let mut urls = Vec::new();
+    for (index, entry) in list.sequence_values::<Value>().enumerate() {
+        let entry = entry?;
+        let raw = match entry {
+            Value::String(value) => value,
+            other => {
+                return Err(LuaPluginError::InvalidTrustedUrlEntry {
+                    index: index + 1,
+                    kind: value_kind(&other).to_string(),
+                });
+            }
+        };
+        let text = raw
+            .to_str()
+            .map_err(|_| LuaPluginError::TrustedUrlEntryNotUtf8 { index: index + 1 })?;
+        urls.push(TrustedUrl::parse(text.as_ref())?);
+    }
+    Ok(urls)
+}
+
+fn parse_run(table: &mlua::Table) -> Result<mlua::Function, LuaPluginError> {
+    table
+        .get("run")
+        .map_err(|_| LuaPluginError::MissingRunFunction)
+}
+
+fn value_kind(value: &Value) -> &'static str {
+    match value {
+        Value::Nil => "nil",
+        Value::Boolean(_) => "boolean",
+        Value::LightUserData(_) => "lightuserdata",
+        Value::Integer(_) => "integer",
+        Value::Number(_) => "number",
+        Value::String(_) => "string",
+        Value::Table(_) => "table",
+        Value::Function(_) => "function",
+        Value::Thread(_) => "thread",
+        Value::UserData(_) => "userdata",
+        Value::Error(_) => "error",
+        Value::Other(_) => "other",
+    }
+}
