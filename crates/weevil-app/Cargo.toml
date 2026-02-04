@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-weevil-script = { path = "../weevil-script" }
+weevil-lua = { path = "../weevil-lua" }
 
 [[bin]]
 name = "weevil"

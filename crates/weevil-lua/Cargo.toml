@@ -1,4 +1,4 @@
 [package]
-name = "weevil-script"
+name = "weevil-lua"
 version.workspace = true
 edition.workspace = true
