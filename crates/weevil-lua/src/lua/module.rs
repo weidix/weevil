@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use mlua::{Lua, Table};
+use mlua::{Lua, Table, Value};
 use weevil_core::{HtmlTree, Selector, XPath};
 
 use crate::error::LuaPluginError;
@@ -134,10 +134,23 @@ fn build_http_table(lua: &Lua, http_mode: HttpMode) -> Result<Table, LuaPluginEr
                     Err(mlua::Error::external(LuaPluginError::HttpDisabled))
                 })?,
             )?;
+            http.set(
+                "get_with_headers",
+                lua.create_function(|_, _: (String, Table)| -> mlua::Result<String> {
+                    Err(mlua::Error::external(LuaPluginError::HttpDisabled))
+                })?,
+            )?;
             #[cfg(feature = "async")]
             http.set(
                 "get_async",
                 lua.create_async_function(|_, _: String| async move {
+                    Err::<String, _>(mlua::Error::external(LuaPluginError::HttpDisabled))
+                })?,
+            )?;
+            #[cfg(feature = "async")]
+            http.set(
+                "get_async_with_headers",
+                lua.create_async_function(|_, _: (String, Table)| async move {
                     Err::<String, _>(mlua::Error::external(LuaPluginError::HttpDisabled))
                 })?,
             )?;
@@ -148,6 +161,16 @@ fn build_http_table(lua: &Lua, http_mode: HttpMode) -> Result<Table, LuaPluginEr
                 "get",
                 lua.create_function(move |_, url: String| {
                     blocking.get_blocking(&url).map_err(mlua::Error::external)
+                })?,
+            )?;
+            let blocking = client.clone();
+            http.set(
+                "get_with_headers",
+                lua.create_function(move |_, (url, headers): (String, Table)| {
+                    let headers = parse_header_table(headers).map_err(mlua::Error::external)?;
+                    blocking
+                        .get_blocking_with_headers(&url, &headers)
+                        .map_err(mlua::Error::external)
                 })?,
             )?;
             #[cfg(feature = "async")]
@@ -165,8 +188,72 @@ fn build_http_table(lua: &Lua, http_mode: HttpMode) -> Result<Table, LuaPluginEr
                         }
                     })?,
                 )?;
+                let async_client = client.clone();
+                http.set(
+                    "get_async_with_headers",
+                    lua.create_async_function(move |_, (url, headers): (String, Table)| {
+                        let async_client = async_client.clone();
+                        async move {
+                            let headers =
+                                parse_header_table(headers).map_err(mlua::Error::external)?;
+                            async_client
+                                .get_async_with_headers(&url, &headers)
+                                .await
+                                .map_err(mlua::Error::external)
+                        }
+                    })?,
+                )?;
             }
         }
     }
     Ok(http)
+}
+
+fn parse_header_table(table: Table) -> Result<Vec<(String, String)>, LuaPluginError> {
+    let mut headers = Vec::new();
+    for pair in table.pairs::<Value, Value>() {
+        let (key, value) = pair?;
+        let name = match key {
+            Value::String(value) => value
+                .to_str()
+                .map_err(|_| LuaPluginError::HttpHeaderNameNotUtf8)?
+                .to_string(),
+            other => {
+                return Err(LuaPluginError::HttpHeaderNameNotString {
+                    kind: value_kind(&other).to_string(),
+                });
+            }
+        };
+        let value = match value {
+            Value::String(value) => value
+                .to_str()
+                .map_err(|_| LuaPluginError::HttpHeaderValueNotUtf8 { name: name.clone() })?
+                .to_string(),
+            other => {
+                return Err(LuaPluginError::HttpHeaderValueNotString {
+                    name,
+                    kind: value_kind(&other).to_string(),
+                });
+            }
+        };
+        headers.push((name, value));
+    }
+    Ok(headers)
+}
+
+fn value_kind(value: &Value) -> &'static str {
+    match value {
+        Value::Nil => "nil",
+        Value::Boolean(_) => "boolean",
+        Value::LightUserData(_) => "lightuserdata",
+        Value::Integer(_) => "integer",
+        Value::Number(_) => "number",
+        Value::String(_) => "string",
+        Value::Table(_) => "table",
+        Value::Function(_) => "function",
+        Value::Thread(_) => "thread",
+        Value::UserData(_) => "userdata",
+        Value::Error(_) => "error",
+        Value::Other(_) => "other",
+    }
 }

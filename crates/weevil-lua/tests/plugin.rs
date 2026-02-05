@@ -61,6 +61,42 @@ return {
 }
 
 #[test]
+fn http_rejects_non_string_header_name() {
+    let script = r#"
+return {
+  trusted_urls = { "https://example.com/" },
+  run = function()
+    return weevil.http.get_with_headers("https://example.com/", { [1] = "value" })
+  end
+}
+"#;
+    let plugin = LuaPlugin::from_str(&script).expect("load plugin");
+    let err = plugin.call(()).expect_err("should fail");
+    assert!(
+        err.to_string()
+            .contains("HTTP header name must be a string")
+    );
+}
+
+#[test]
+fn http_rejects_non_string_header_value() {
+    let script = r#"
+return {
+  trusted_urls = { "https://example.com/" },
+  run = function()
+    return weevil.http.get_with_headers("https://example.com/", { ["user-agent"] = 123 })
+  end
+}
+"#;
+    let plugin = LuaPlugin::from_str(&script).expect("load plugin");
+    let err = plugin.call(()).expect_err("should fail");
+    assert!(
+        err.to_string()
+            .contains("HTTP header user-agent must be a string value")
+    );
+}
+
+#[test]
 fn from_str_requires_run() {
     let script = "return { trusted_urls = {} }";
     let err = LuaPlugin::from_str(script).err().expect("should fail");

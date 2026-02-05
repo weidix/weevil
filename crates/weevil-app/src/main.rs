@@ -145,6 +145,13 @@ impl AppError {
                     eprintln!("failed to print CLI error: {io_error}");
                 }
             }
+            AppError::LuaPlugin(error) => {
+                if let Some(message) = format_lua_plugin_error(error) {
+                    eprintln!("{message}");
+                } else {
+                    eprintln!("{error}");
+                }
+            }
             other => {
                 eprintln!("{other}");
             }
@@ -181,9 +188,81 @@ impl fmt::Display for AppError {
     }
 }
 
+fn format_lua_plugin_error(error: &weevil_lua::LuaPluginError) -> Option<String> {
+    match error {
+        weevil_lua::LuaPluginError::Lua(lua_error) => Some(format_lua_error(lua_error)),
+        weevil_lua::LuaPluginError::HttpStatus { url, status } => {
+            Some(format_http_status_hint(*status, url))
+        }
+        _ => None,
+    }
+}
+
+fn format_lua_error(error: &mlua::Error) -> String {
+    match error {
+        mlua::Error::CallbackError { cause, traceback } => {
+            let mut message = format_lua_error(cause.as_ref());
+            if let Some(frame) = extract_lua_frame(traceback) {
+                if message.is_empty() {
+                    message = format!("Lua error at {frame}");
+                } else {
+                    message = format!("{message}\nLua traceback (first frame): {frame}");
+                }
+            }
+            message
+        }
+        mlua::Error::WithContext { context, cause } => {
+            let inner = format_lua_error(cause.as_ref());
+            if inner.is_empty() {
+                context.to_string()
+            } else {
+                format!("{context}: {inner}")
+            }
+        }
+        _ => {
+            if let Some(plugin_error) = error.downcast_ref::<weevil_lua::LuaPluginError>() {
+                if let Some(message) = format_lua_plugin_error(plugin_error) {
+                    return message;
+                }
+                return plugin_error.to_string();
+            }
+            error.to_string()
+        }
+    }
+}
+
+fn extract_lua_frame(traceback: &str) -> Option<String> {
+    for line in traceback.lines() {
+        let trimmed = line.trim();
+        if trimmed.contains(".lua:") {
+            let end = trimmed.find(" in ").unwrap_or(trimmed.len());
+            return Some(trimmed[..end].to_string());
+        }
+        if trimmed.starts_with("[string ") {
+            let end = trimmed.find(" in ").unwrap_or(trimmed.len());
+            return Some(trimmed[..end].to_string());
+        }
+    }
+    None
+}
+
+fn format_http_status_hint(status: u16, url: &str) -> String {
+    let base = format!("HTTP request returned status {status} for {url}.");
+    match status {
+        401 | 403 => format!(
+            "{base} Hint: the site may require authentication or block non-browser clients. \
+Try a mirror domain, a proxy, or confirm the URL is reachable in a browser."
+        ),
+        429 => format!("{base} Hint: rate limit detected. Slow down requests or retry later."),
+        500..=599 => format!("{base} Hint: the server is unavailable or unstable. Retry later."),
+        _ => base,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
 
     #[test]
     fn parse_name_command() {
@@ -273,5 +352,22 @@ mod tests {
         let text = lua.create_string("<movie />").expect("expected lua string");
         let xml = render_nfo_output(Some(Value::String(text)), &lua).expect("expected xml");
         assert_eq!(xml, "<movie />");
+    }
+
+    #[test]
+    fn extract_lua_frame_prefers_lua_paths() {
+        let trace = "stack traceback:\n\t/path/to/script.lua:42: in function 'run'\n\t[C]: in ?";
+        let frame = extract_lua_frame(trace).expect("expected frame");
+        assert_eq!(frame, "/path/to/script.lua:42:");
+    }
+
+    #[test]
+    fn format_callback_error_includes_first_frame() {
+        let error = mlua::Error::CallbackError {
+            traceback: "stack traceback:\n\tscript.lua:7: in function 'run'".to_string(),
+            cause: Arc::new(mlua::Error::RuntimeError("boom".to_string())),
+        };
+        let message = format_lua_error(&error);
+        assert!(message.contains("Lua traceback (first frame): script.lua:7:"));
     }
 }

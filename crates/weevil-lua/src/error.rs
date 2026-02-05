@@ -32,6 +32,18 @@ pub enum LuaPluginError {
     HttpUrlUnsupportedScheme { scheme: String, value: String },
     #[error("URL {url} is not in the trusted list")]
     UntrustedUrl { url: String },
+    #[error("HTTP header name must be a string, got {kind}")]
+    HttpHeaderNameNotString { kind: String },
+    #[error("HTTP header name is not valid UTF-8")]
+    HttpHeaderNameNotUtf8,
+    #[error("HTTP header {name} must be a string value, got {kind}")]
+    HttpHeaderValueNotString { name: String, kind: String },
+    #[error("HTTP header {name} value is not valid UTF-8")]
+    HttpHeaderValueNotUtf8 { name: String },
+    #[error("HTTP header name is invalid: {name}")]
+    HttpHeaderInvalidName { name: String },
+    #[error("HTTP header {name} has invalid value: {value}")]
+    HttpHeaderInvalidValue { name: String, value: String },
     #[error("HTTP request failed for {url}: {source}")]
     HttpRequest {
         url: String,
