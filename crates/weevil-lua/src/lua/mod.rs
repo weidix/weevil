@@ -3,4 +3,4 @@ mod json;
 mod module;
 mod types;
 
-pub(crate) use module::{HttpMode, install_module, set_http};
+pub(crate) use module::{HttpMode, LogContext, install_module, set_http, set_log_context};

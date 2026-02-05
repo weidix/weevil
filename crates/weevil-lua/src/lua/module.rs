@@ -16,12 +16,23 @@ pub enum HttpMode {
     Enabled(Arc<HttpClient>),
 }
 
+#[derive(Clone, Debug)]
+pub(crate) struct LogContext {
+    pub(crate) task_id: String,
+    pub(crate) task_type: String,
+}
+
+pub(crate) fn set_log_context(lua: &Lua, context: LogContext) {
+    lua.set_app_data(context);
+}
+
 pub fn install_module(lua: &Lua, http_mode: HttpMode) -> Result<(), LuaPluginError> {
     let weevil = lua.create_table()?;
     weevil.set("html", build_html_table(lua)?)?;
     weevil.set("selector", build_selector_table(lua)?)?;
     weevil.set("xpath", build_xpath_table(lua)?)?;
     weevil.set("http", build_http_table(lua, http_mode)?)?;
+    weevil.set("log", build_log_table(lua)?)?;
     #[cfg(feature = "json")]
     weevil.set("json", build_json_table(lua)?)?;
     lua.globals().set("weevil", weevil)?;
@@ -179,6 +190,71 @@ fn build_http_table(lua: &Lua, http_mode: HttpMode) -> Result<Table, LuaPluginEr
     Ok(http)
 }
 
+fn build_log_table(lua: &Lua) -> Result<Table, LuaPluginError> {
+    let log = lua.create_table()?;
+    log.set(
+        "debug",
+        lua.create_function(|lua, values: mlua::Variadic<Value>| {
+            let message = format_variadic(values);
+            let (task_id, task_type) = log_context(lua);
+            tracing::debug!(
+                target: "weevil.lua",
+                task_id = %task_id,
+                task_type = %task_type,
+                "{}",
+                message
+            );
+            Ok(())
+        })?,
+    )?;
+    log.set(
+        "info",
+        lua.create_function(|lua, values: mlua::Variadic<Value>| {
+            let message = format_variadic(values);
+            let (task_id, task_type) = log_context(lua);
+            tracing::info!(
+                target: "weevil.lua",
+                task_id = %task_id,
+                task_type = %task_type,
+                "{}",
+                message
+            );
+            Ok(())
+        })?,
+    )?;
+    log.set(
+        "warn",
+        lua.create_function(|lua, values: mlua::Variadic<Value>| {
+            let message = format_variadic(values);
+            let (task_id, task_type) = log_context(lua);
+            tracing::warn!(
+                target: "weevil.lua",
+                task_id = %task_id,
+                task_type = %task_type,
+                "{}",
+                message
+            );
+            Ok(())
+        })?,
+    )?;
+    log.set(
+        "error",
+        lua.create_function(|lua, values: mlua::Variadic<Value>| {
+            let message = format_variadic(values);
+            let (task_id, task_type) = log_context(lua);
+            tracing::error!(
+                target: "weevil.lua",
+                task_id = %task_id,
+                task_type = %task_type,
+                "{}",
+                message
+            );
+            Ok(())
+        })?,
+    )?;
+    Ok(log)
+}
+
 fn parse_http_options(options: Option<Value>) -> Result<HttpRequestOptions, LuaPluginError> {
     let Some(options) = options else {
         return Ok(HttpRequestOptions::default());
@@ -278,6 +354,36 @@ fn parse_header_table(table: Table) -> Result<Vec<(String, String)>, LuaPluginEr
         headers.push((name, value));
     }
     Ok(headers)
+}
+
+fn log_context(lua: &Lua) -> (String, String) {
+    if let Some(context) = lua.app_data_ref::<LogContext>() {
+        (context.task_id.clone(), context.task_type.clone())
+    } else {
+        ("unknown".to_string(), "unknown".to_string())
+    }
+}
+
+fn format_variadic(values: mlua::Variadic<Value>) -> String {
+    if values.is_empty() {
+        return String::new();
+    }
+    let mut parts = Vec::with_capacity(values.len());
+    for value in values {
+        parts.push(format_lua_value(value));
+    }
+    parts.join(" ")
+}
+
+fn format_lua_value(value: Value) -> String {
+    match value {
+        Value::Nil => "nil".to_string(),
+        Value::Boolean(value) => value.to_string(),
+        Value::Integer(value) => value.to_string(),
+        Value::Number(value) => value.to_string(),
+        Value::String(value) => String::from_utf8_lossy(value.as_bytes().as_ref()).into_owned(),
+        other => format!("<{}>", value_kind(&other)),
+    }
 }
 
 fn value_kind(value: &Value) -> &'static str {

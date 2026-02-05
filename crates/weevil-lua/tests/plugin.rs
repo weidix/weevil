@@ -1,4 +1,87 @@
+use std::collections::HashMap;
+use std::fmt;
+use std::sync::{Arc, Mutex, Once, OnceLock};
+
+use tracing_subscriber::prelude::*;
 use weevil_lua::{LuaPlugin, check_script};
+
+struct FieldLayer {
+    records: Arc<Mutex<Vec<HashMap<String, String>>>>,
+}
+
+impl<S> tracing_subscriber::Layer<S> for FieldLayer
+where
+    S: tracing::Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a>,
+{
+    fn on_event(
+        &self,
+        event: &tracing::Event<'_>,
+        _ctx: tracing_subscriber::layer::Context<'_, S>,
+    ) {
+        if event.metadata().target() != "weevil.lua" {
+            return;
+        }
+        let mut visitor = FieldVisitor::default();
+        event.record(&mut visitor);
+        if !visitor.fields.is_empty() {
+            let mut records = self.records.lock().expect("log lock");
+            records.push(visitor.fields);
+        }
+    }
+}
+
+#[derive(Default)]
+struct FieldVisitor {
+    fields: HashMap<String, String>,
+}
+
+impl tracing::field::Visit for FieldVisitor {
+    fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn fmt::Debug) {
+        self.record(field, format!("{value:?}"));
+    }
+
+    fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
+        self.record(field, value.to_string());
+    }
+}
+
+impl FieldVisitor {
+    fn record(&mut self, field: &tracing::field::Field, value: String) {
+        let name = field.name();
+        if name != "task_id" && name != "task_type" {
+            return;
+        }
+        let cleaned = value
+            .strip_prefix('"')
+            .and_then(|v| v.strip_suffix('"'))
+            .unwrap_or(&value)
+            .to_string();
+        self.fields.insert(name.to_string(), cleaned);
+    }
+}
+
+static LOG_RECORDS: OnceLock<Arc<Mutex<Vec<HashMap<String, String>>>>> = OnceLock::new();
+static INIT_TRACING: Once = Once::new();
+
+fn init_test_tracing() {
+    INIT_TRACING.call_once(|| {
+        let records = Arc::new(Mutex::new(Vec::new()));
+        LOG_RECORDS.set(records.clone()).expect("set log records");
+        let layer = FieldLayer { records };
+        let subscriber = tracing_subscriber::registry().with(layer);
+        tracing::subscriber::set_global_default(subscriber).expect("set subscriber");
+    });
+}
+
+fn drain_logs() -> Vec<HashMap<String, String>> {
+    let Some(records) = LOG_RECORDS.get() else {
+        return Vec::new();
+    };
+    let mut guard = records.lock().expect("log lock");
+    let snapshot = guard.clone();
+    guard.clear();
+    snapshot
+}
 
 #[test]
 fn check_requires_return_value() {
@@ -43,6 +126,41 @@ return {
         _ => panic!("expected string"),
     };
     assert_eq!(text, "Hello");
+}
+
+#[test]
+fn lua_logs_include_task_context() {
+    init_test_tracing();
+    drain_logs();
+    let script = r#"
+return {
+  trusted_urls = {},
+  run = function()
+    weevil.log.info("start", 1)
+    weevil.log.warn("slow response")
+    return "ok"
+  end
+}
+"#;
+    let plugin = LuaPlugin::from_str(script).expect("load plugin");
+    plugin.set_log_context("task-123", "demo");
+    let result = plugin.call(()).expect("run plugin");
+    let value = result.expect("missing value");
+    let text = match value {
+        mlua::Value::String(value) => value.to_str().expect("utf8").to_string(),
+        _ => panic!("expected string"),
+    };
+    assert_eq!(text, "ok");
+    let logs = drain_logs();
+    assert!(logs.iter().any(|entry| {
+        entry
+            .get("task_id")
+            .is_some_and(|value| value == "task-123")
+    }));
+    assert!(
+        logs.iter()
+            .any(|entry| entry.get("task_type").is_some_and(|value| value == "demo"))
+    );
 }
 
 #[test]

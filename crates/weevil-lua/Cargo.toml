@@ -13,5 +13,9 @@ mlua = { version = "0.11", features = ["lua55", "vendored"] }
 reqwest = { version = "0.13", default-features = false, features = ["blocking", "http2", "rustls"] }
 serde_json = { version = "1", optional = true }
 thiserror = "2"
+tracing = "0.1"
 url = "2"
 weevil-core = { path = "../weevil-core" }
+
+[dev-dependencies]
+tracing-subscriber = { version = "0.3", features = ["fmt"] }

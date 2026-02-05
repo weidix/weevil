@@ -6,7 +6,7 @@ use mlua::{IntoLuaMulti, Lua, RegistryKey, Value};
 
 use crate::error::LuaPluginError;
 use crate::http::{HttpClient, TrustedUrl};
-use crate::lua::{HttpMode, install_module, set_http};
+use crate::lua::{HttpMode, LogContext, install_module, set_http, set_log_context};
 
 #[derive(Debug, Clone)]
 pub struct LuaPluginSpec {
@@ -83,6 +83,16 @@ impl LuaPlugin {
 
     pub fn lua(&self) -> &Lua {
         &self.lua
+    }
+
+    pub fn set_log_context(&self, task_id: impl Into<String>, task_type: impl Into<String>) {
+        set_log_context(
+            &self.lua,
+            LogContext {
+                task_id: task_id.into(),
+                task_type: task_type.into(),
+            },
+        );
     }
 
     pub fn call<A>(&self, args: A) -> Result<Option<Value>, LuaPluginError>
