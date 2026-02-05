@@ -4,6 +4,9 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+clap = { version = "4", features = ["derive"] }
+mlua = { version = "0.11", features = ["lua55", "vendored", "serde"] }
+quick-xml = { version = "0.37", features = ["serialize"] }
 serde = { version = "1", features = ["derive"] }
 weevil-lua = { path = "../weevil-lua" }
 
