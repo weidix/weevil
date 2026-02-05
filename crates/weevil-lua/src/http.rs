@@ -12,7 +12,8 @@ pub struct TrustedUrl {
     scheme: String,
     host: String,
     port: Option<u16>,
-    path_prefix: String,
+    path_pattern: String,
+    path_has_wildcard: bool,
 }
 
 impl TrustedUrl {
@@ -38,17 +39,19 @@ impl TrustedUrl {
                 value: input.to_string(),
             })?
             .to_string();
-        let path_prefix = if url.path().is_empty() {
+        let path_pattern = if url.path().is_empty() {
             "/".to_string()
         } else {
             url.path().to_string()
         };
+        let path_has_wildcard = path_pattern.as_bytes().iter().any(|ch| *ch == b'*');
         Ok(Self {
             original: input.to_string(),
             scheme: url.scheme().to_string(),
             host,
             port: url.port(),
-            path_prefix,
+            path_pattern,
+            path_has_wildcard,
         })
     }
 
@@ -69,7 +72,80 @@ impl TrustedUrl {
         if url.port() != self.port {
             return false;
         }
-        url.path().starts_with(&self.path_prefix)
+        if self.path_has_wildcard {
+            path_glob_matches(&self.path_pattern, url.path())
+        } else {
+            url.path().starts_with(&self.path_pattern)
+        }
+    }
+}
+
+fn path_glob_matches(pattern: &str, path: &str) -> bool {
+    let pattern = pattern.as_bytes();
+    let path = path.as_bytes();
+    let mut pattern_index = 0;
+    let mut path_index = 0;
+    let mut star_index = None;
+    let mut star_match_index = 0;
+    while path_index < path.len() {
+        if pattern_index < pattern.len() && pattern[pattern_index] == b'*' {
+            star_index = Some(pattern_index);
+            star_match_index = path_index;
+            pattern_index += 1;
+        } else if pattern_index < pattern.len() && pattern[pattern_index] == path[path_index] {
+            pattern_index += 1;
+            path_index += 1;
+        } else if let Some(star_index) = star_index {
+            if star_match_index < path.len() && path[star_match_index] == b'/' {
+                return false;
+            }
+            star_match_index += 1;
+            path_index = star_match_index;
+            pattern_index = star_index + 1;
+        } else {
+            return false;
+        }
+    }
+    while pattern_index < pattern.len() && pattern[pattern_index] == b'*' {
+        pattern_index += 1;
+    }
+    pattern_index == pattern.len()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::TrustedUrl;
+    use url::Url;
+
+    fn trusted_url(input: &str) -> TrustedUrl {
+        TrustedUrl::parse(input).expect("trusted url")
+    }
+
+    fn parsed_url(input: &str) -> Url {
+        Url::parse(input).expect("url")
+    }
+
+    #[test]
+    fn trusted_url_prefix_matches_without_wildcards() {
+        let trusted = trusted_url("https://example.com/foo/");
+        assert!(trusted.matches(&parsed_url("https://example.com/foo/bar")));
+        assert!(trusted.matches(&parsed_url("https://example.com/foo/")));
+        assert!(!trusted.matches(&parsed_url("https://example.com/foobar/")));
+    }
+
+    #[test]
+    fn trusted_url_matches_single_segment_wildcard() {
+        let trusted = trusted_url("https://example.com/foo/*/bar");
+        assert!(trusted.matches(&parsed_url("https://example.com/foo/a/bar")));
+        assert!(!trusted.matches(&parsed_url("https://example.com/foo/a/b/bar")));
+    }
+
+    #[test]
+    fn trusted_url_matches_suffix_wildcard() {
+        let trusted = trusted_url("https://example.com/*.nfo");
+        assert!(trusted.matches(&parsed_url("https://example.com/movie.nfo")));
+        assert!(!trusted.matches(&parsed_url("https://example.com/movie.txt")));
+        assert!(!trusted.matches(&parsed_url("https://example.com/dir/movie.nfo")));
     }
 }
 
