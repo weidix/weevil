@@ -53,6 +53,12 @@ pub(crate) enum AppError {
         to: PathBuf,
         source: std::io::Error,
     },
+    FileLink {
+        from: PathBuf,
+        to: PathBuf,
+        kind: LinkKind,
+        source: std::io::Error,
+    },
     FileCopy {
         from: PathBuf,
         to: PathBuf,
@@ -74,9 +80,6 @@ pub(crate) enum AppError {
         template: String,
     },
     TemplateEmptySegment {
-        template: String,
-    },
-    TemplateAbsolutePath {
         template: String,
     },
     InputNameFormatEmpty {
@@ -167,6 +170,17 @@ impl fmt::Display for AppError {
             AppError::FileMove { from, to, source } => {
                 write!(f, "failed to move file from {from:?} to {to:?}: {source}")
             }
+            AppError::FileLink {
+                from,
+                to,
+                kind,
+                source,
+            } => {
+                write!(
+                    f,
+                    "failed to create {kind} link from {from:?} to {to:?}: {source}"
+                )
+            }
             AppError::FileCopy { from, to, source } => {
                 write!(f, "failed to copy file from {from:?} to {to:?}: {source}")
             }
@@ -185,15 +199,27 @@ impl fmt::Display for AppError {
             AppError::TemplateEmptySegment { template } => {
                 write!(f, "template {template:?} resolved to an empty path segment")
             }
-            AppError::TemplateAbsolutePath { template } => {
-                write!(f, "template {template:?} resolved to an absolute path")
-            }
             AppError::InputNameFormatEmpty { input, rules } => {
                 write!(
                     f,
                     "input filename {input:?} resolved to empty after applying remove rules {rules:?}"
                 )
             }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum LinkKind {
+    Hard,
+    Soft,
+}
+
+impl fmt::Display for LinkKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            LinkKind::Hard => write!(f, "hard"),
+            LinkKind::Soft => write!(f, "soft"),
         }
     }
 }

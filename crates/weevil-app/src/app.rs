@@ -6,7 +6,7 @@ use mlua::{LuaSerdeExt, Value};
 use serde::Serialize;
 use weevil_lua::LuaPlugin;
 
-use crate::cli::{Cli, Command};
+use crate::cli::{Cli, Command, FolderMultiStrategy};
 use crate::errors::AppError;
 use crate::file_mode;
 use crate::nfo;
@@ -22,20 +22,26 @@ pub(crate) fn run() -> Result<(), AppError> {
         Command::File {
             input,
             script,
-            output_dir,
+            output,
             input_name_remove,
-            file_format,
-            folder_format,
+            folder_multi,
         } => file_mode::run_file_mode(
             &input,
             &script,
-            &output_dir,
+            &output,
             &input_name_remove,
-            &file_format,
-            &folder_format,
+            map_folder_multi(folder_multi),
         ),
         Command::Dir => Err(AppError::NotImplemented { mode: "dir" }),
         Command::Watch => Err(AppError::NotImplemented { mode: "watch" }),
+    }
+}
+
+fn map_folder_multi(strategy: FolderMultiStrategy) -> file_mode::MultiFolderStrategy {
+    match strategy {
+        FolderMultiStrategy::HardLink => file_mode::MultiFolderStrategy::HardLink,
+        FolderMultiStrategy::SoftLink => file_mode::MultiFolderStrategy::SoftLink,
+        FolderMultiStrategy::First => file_mode::MultiFolderStrategy::First,
     }
 }
 

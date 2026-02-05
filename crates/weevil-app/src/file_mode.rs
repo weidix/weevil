@@ -1,5 +1,5 @@
 use crate::app::{TaskContext, render_nfo_output};
-use crate::errors::AppError;
+use crate::errors::{AppError, LinkKind};
 use crate::nfo::Movie;
 use fs2::FileExt;
 use quick_xml::de::from_str;
@@ -10,18 +10,15 @@ use weevil_lua::LuaPlugin;
 
 mod naming;
 
-use naming::{build_file_name, format_file_base, format_folder_path, format_input_name};
+use naming::{build_file_name, format_input_name, format_output_paths};
 
-const DEFAULT_FILE_TEMPLATE: &str = "{title}";
-const DEFAULT_FOLDER_TEMPLATE: &str = "{title}";
 const SUBTITLE_EXTENSIONS: &[&str] = &["srt", "ass", "ssa", "vtt", "sub", "idx", "sup"];
 pub(crate) fn run_file_mode(
     input: &Path,
     script: &Path,
-    output_dir: &Path,
+    output_template: &str,
     input_name_remove: &[String],
-    file_format: &str,
-    folder_format: &str,
+    folder_multi: MultiFolderStrategy,
 ) -> Result<(), AppError> {
     ensure_input_file(input)?;
     let input_stem = file_stem_string(input)?;
@@ -37,63 +34,123 @@ pub(crate) fn run_file_mode(
     let xml = render_nfo_output(value, plugin.lua())?;
     let movie: Movie = from_str(&xml).map_err(AppError::NfoParse)?;
 
-    let file_template = if file_format.trim().is_empty() {
-        DEFAULT_FILE_TEMPLATE
-    } else {
-        file_format
-    };
-    let folder_template = if folder_format.trim().is_empty() {
-        DEFAULT_FOLDER_TEMPLATE
-    } else {
-        folder_format
-    };
-
-    let file_base = format_file_base(file_template, &movie, &input_stem)?;
-    let folder_path = format_folder_path(folder_template, &movie, &input_stem)?;
-
-    fs::create_dir_all(output_dir).map_err(|err| AppError::OutputDirCreate {
-        path: output_dir.to_path_buf(),
-        source: err,
+    let output_paths = format_output_paths(output_template, &movie, &input_stem)?;
+    let mut output_iter = output_paths.into_iter();
+    let primary_output = output_iter.next().ok_or_else(|| AppError::TemplateEmpty {
+        template: output_template.to_string(),
     })?;
+    let extra_paths = if matches!(folder_multi, MultiFolderStrategy::First) {
+        Vec::new()
+    } else {
+        output_iter.collect()
+    };
 
-    let target_dir = output_dir.join(folder_path);
-    fs::create_dir_all(&target_dir).map_err(|err| AppError::OutputDirCreate {
-        path: target_dir.clone(),
-        source: err,
-    })?;
+    let primary_output = split_output_path(&primary_output, output_template)?;
+    let extra_outputs = extra_paths
+        .iter()
+        .map(|path| split_output_path(path, output_template))
+        .collect::<Result<Vec<_>, AppError>>()?;
+
+    ensure_output_dir(&primary_output.dir)?;
+    for output in &extra_outputs {
+        ensure_output_dir(&output.dir)?;
+    }
 
     let input_extension = extension_string(input)?;
-    let video_target = target_dir.join(build_file_name(&file_base, input_extension.as_deref()));
-    let nfo_target = target_dir.join(format!("{file_base}.nfo"));
-
     let subtitles = find_subtitles(input, &input_stem)?;
+    let primary_targets = build_output_targets(&primary_output, &input_extension, &subtitles)?;
+    let extra_targets = extra_outputs
+        .iter()
+        .map(|output| build_output_targets(output, &input_extension, &subtitles))
+        .collect::<Result<Vec<_>, AppError>>()?;
+
     let subtitle_moves = subtitles
-        .into_iter()
-        .map(|subtitle| build_subtitle_move(&subtitle, &file_base, &target_dir))
+        .iter()
+        .map(|subtitle| {
+            build_subtitle_move(subtitle, &primary_output.file_base, &primary_output.dir)
+        })
         .collect::<Result<Vec<MoveItem>, AppError>>()?;
 
     let mut moves = Vec::with_capacity(1 + subtitle_moves.len());
     moves.push(MoveItem {
         from: input.to_path_buf(),
-        to: video_target.clone(),
+        to: primary_targets.video.clone(),
     });
     moves.extend(subtitle_moves);
 
     preflight_moves(&moves)?;
-    if nfo_target.exists() {
-        return Err(AppError::OutputPathExists { path: nfo_target });
+    let mut link_targets = Vec::with_capacity(1 + extra_targets.len() * 3);
+    link_targets.push(primary_targets.nfo.clone());
+    for targets in &extra_targets {
+        link_targets.push(targets.video.clone());
+        link_targets.push(targets.nfo.clone());
+        link_targets.extend(targets.subtitles.iter().cloned());
     }
+    preflight_output_paths(&link_targets)?;
 
     for item in moves {
         move_locked_file(&item.from, &item.to)?;
     }
 
-    fs::write(&nfo_target, xml).map_err(|err| AppError::OutputWrite {
-        path: nfo_target,
+    fs::write(&primary_targets.nfo, xml).map_err(|err| AppError::OutputWrite {
+        path: primary_targets.nfo.clone(),
         source: err,
     })?;
 
+    if matches!(
+        folder_multi,
+        MultiFolderStrategy::HardLink | MultiFolderStrategy::SoftLink
+    ) {
+        for targets in &extra_targets {
+            create_links(folder_multi, &primary_targets, targets)?;
+        }
+    }
+
     Ok(())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MultiFolderStrategy {
+    HardLink,
+    SoftLink,
+    First,
+}
+
+struct OutputTargets {
+    video: PathBuf,
+    nfo: PathBuf,
+    subtitles: Vec<PathBuf>,
+}
+
+struct OutputPath {
+    dir: PathBuf,
+    file_base: String,
+}
+
+fn split_output_path(path: &Path, template: &str) -> Result<OutputPath, AppError> {
+    let file_base = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .ok_or_else(|| AppError::TemplateInvalid {
+            template: template.to_string(),
+            reason: format!("output path {path:?} is missing a filename"),
+        })?
+        .to_string();
+    let dir = match path.parent() {
+        Some(parent) if !parent.as_os_str().is_empty() => parent.to_path_buf(),
+        _ => PathBuf::new(),
+    };
+    Ok(OutputPath { dir, file_base })
+}
+
+fn ensure_output_dir(dir: &Path) -> Result<(), AppError> {
+    if dir.as_os_str().is_empty() {
+        return Ok(());
+    }
+    fs::create_dir_all(dir).map_err(|err| AppError::OutputDirCreate {
+        path: dir.to_path_buf(),
+        source: err,
+    })
 }
 fn ensure_input_file(input: &Path) -> Result<(), AppError> {
     let metadata = fs::metadata(input).map_err(|err| AppError::InputMetadata {
@@ -197,13 +254,46 @@ fn build_subtitle_move(
     file_base: &str,
     target_dir: &Path,
 ) -> Result<MoveItem, AppError> {
-    let extension = extension_string(&subtitle.path)?;
-    let target_base = format!("{file_base}{}", subtitle.suffix);
-    let target_name = build_file_name(&target_base, extension.as_deref());
-    let target = target_dir.join(target_name);
+    let target = build_subtitle_target(subtitle, file_base, target_dir)?;
     Ok(MoveItem {
         from: subtitle.path.clone(),
         to: target,
+    })
+}
+
+fn build_subtitle_target(
+    subtitle: &SubtitleMatch,
+    file_base: &str,
+    target_dir: &Path,
+) -> Result<PathBuf, AppError> {
+    let extension = extension_string(&subtitle.path)?;
+    let target_base = format!("{file_base}{}", subtitle.suffix);
+    let target_name = build_file_name(&target_base, extension.as_deref());
+    Ok(target_dir.join(target_name))
+}
+
+fn build_output_targets(
+    output: &OutputPath,
+    input_extension: &Option<String>,
+    subtitles: &[SubtitleMatch],
+) -> Result<OutputTargets, AppError> {
+    let video = output.dir.join(build_file_name(
+        &output.file_base,
+        input_extension.as_deref(),
+    ));
+    let nfo = output.dir.join(format!("{}.nfo", output.file_base));
+    let mut subtitle_targets = Vec::with_capacity(subtitles.len());
+    for subtitle in subtitles {
+        subtitle_targets.push(build_subtitle_target(
+            subtitle,
+            &output.file_base,
+            &output.dir,
+        )?);
+    }
+    Ok(OutputTargets {
+        video,
+        nfo,
+        subtitles: subtitle_targets,
     })
 }
 
@@ -219,6 +309,83 @@ fn preflight_moves(moves: &[MoveItem]) -> Result<(), AppError> {
         }
     }
     Ok(())
+}
+
+fn preflight_output_paths(paths: &[PathBuf]) -> Result<(), AppError> {
+    let mut seen = std::collections::HashSet::new();
+    for path in paths {
+        if !seen.insert(path.clone()) {
+            continue;
+        }
+        if path.exists() {
+            return Err(AppError::OutputPathExists { path: path.clone() });
+        }
+    }
+    Ok(())
+}
+
+fn create_links(
+    strategy: MultiFolderStrategy,
+    primary: &OutputTargets,
+    targets: &OutputTargets,
+) -> Result<(), AppError> {
+    if matches!(strategy, MultiFolderStrategy::First) {
+        return Ok(());
+    }
+    create_link(strategy, &primary.video, &targets.video)?;
+    assert_eq!(
+        primary.subtitles.len(),
+        targets.subtitles.len(),
+        "subtitle target length mismatch"
+    );
+    for (from, to) in primary.subtitles.iter().zip(targets.subtitles.iter()) {
+        create_link(strategy, from, to)?;
+    }
+    create_link(strategy, &primary.nfo, &targets.nfo)?;
+    Ok(())
+}
+
+fn create_link(strategy: MultiFolderStrategy, from: &Path, to: &Path) -> Result<(), AppError> {
+    if from == to {
+        return Ok(());
+    }
+    match strategy {
+        MultiFolderStrategy::HardLink => {
+            fs::hard_link(from, to).map_err(|err| AppError::FileLink {
+                from: from.to_path_buf(),
+                to: to.to_path_buf(),
+                kind: LinkKind::Hard,
+                source: err,
+            })
+        }
+        MultiFolderStrategy::SoftLink => {
+            create_soft_link(from, to).map_err(|err| AppError::FileLink {
+                from: from.to_path_buf(),
+                to: to.to_path_buf(),
+                kind: LinkKind::Soft,
+                source: err,
+            })
+        }
+        MultiFolderStrategy::First => Ok(()),
+    }
+}
+
+fn create_soft_link(from: &Path, to: &Path) -> Result<(), std::io::Error> {
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(from, to)
+    }
+    #[cfg(windows)]
+    {
+        std::os::windows::fs::symlink_file(from, to)
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "soft links are not supported on this platform",
+        ))
+    }
 }
 
 fn move_locked_file(from: &Path, to: &Path) -> Result<(), AppError> {

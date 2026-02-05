@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use super::*;
 
 #[test]
@@ -19,23 +21,104 @@ fn render_template_unknown_field_is_error() {
 }
 
 #[test]
-fn format_file_base_falls_back_to_input() {
-    let movie = Movie::default();
-    let base = format_file_base("{title}", &movie, "INPUT").expect("base");
-    assert_eq!(base, "INPUT");
-}
-
-#[test]
-fn format_folder_path_supports_multiple_segments() {
+fn format_output_paths_supports_multiple_segments() {
     let movie = Movie {
         title: Some("Example".to_string()),
         genre: vec!["Action".to_string()],
         ..Movie::default()
     };
-    let path = format_folder_path("{genre}/{title}", &movie, "fallback").expect("path");
-    let rendered = path.to_string_lossy();
-    assert!(rendered.contains("Action"));
-    assert!(rendered.contains("Example"));
+    let paths = format_output_paths("{genre}/{title}/{title}", &movie, "fallback").expect("paths");
+    assert_eq!(
+        paths,
+        vec![PathBuf::from("Action").join("Example").join("Example")]
+    );
+}
+
+#[test]
+fn format_output_paths_expands_actor_fields() {
+    let movie = Movie {
+        title: Some("Example".to_string()),
+        actor: vec![
+            Actor {
+                name: Some("Alice".to_string()),
+                ..Actor::default()
+            },
+            Actor {
+                name: Some("Bob".to_string()),
+                ..Actor::default()
+            },
+        ],
+        ..Movie::default()
+    };
+    let paths = format_output_paths("{actor}/{title}", &movie, "fallback").expect("paths");
+    assert_eq!(
+        paths,
+        vec![
+            PathBuf::from("Alice").join("Example"),
+            PathBuf::from("Bob").join("Example")
+        ]
+    );
+}
+
+#[test]
+fn format_output_paths_expands_genre_list() {
+    let movie = Movie {
+        title: Some("Example".to_string()),
+        genre: vec!["Action".to_string(), "Drama".to_string()],
+        ..Movie::default()
+    };
+    let paths = format_output_paths("{genre}/{title}", &movie, "fallback").expect("paths");
+    assert_eq!(
+        paths,
+        vec![
+            PathBuf::from("Action").join("Example"),
+            PathBuf::from("Drama").join("Example")
+        ]
+    );
+}
+
+#[test]
+fn format_output_paths_falls_back_when_actor_filters_match_none() {
+    let movie = Movie {
+        actor: vec![Actor {
+            name: Some("Alice".to_string()),
+            gender: Some("female".to_string()),
+            ..Actor::default()
+        }],
+        ..Movie::default()
+    };
+    let paths = format_output_paths("{actor[gender=male]}", &movie, "Fallback").expect("paths");
+    assert_eq!(paths, vec![PathBuf::from("Fallback")]);
+}
+
+#[test]
+fn format_output_paths_dedupes_when_template_has_no_actor_fields() {
+    let movie = Movie {
+        title: Some("Example".to_string()),
+        actor: vec![
+            Actor {
+                name: Some("Alice".to_string()),
+                ..Actor::default()
+            },
+            Actor {
+                name: Some("Bob".to_string()),
+                ..Actor::default()
+            },
+        ],
+        ..Movie::default()
+    };
+    let paths = format_output_paths("{title}", &movie, "fallback").expect("paths");
+    assert_eq!(paths, vec![PathBuf::from("Example")]);
+}
+
+#[test]
+fn format_output_paths_uses_template_without_actors() {
+    let movie = Movie {
+        title: Some("Example".to_string()),
+        ..Movie::default()
+    };
+    let paths = format_output_paths("{title}", &movie, "fallback").expect("paths");
+    assert_eq!(paths, vec![PathBuf::from("Example")]);
 }
 
 #[test]

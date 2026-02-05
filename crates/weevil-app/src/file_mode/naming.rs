@@ -1,5 +1,6 @@
 mod actor;
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use crate::errors::AppError;
@@ -18,38 +19,68 @@ pub(crate) fn build_file_name(base: &str, extension: Option<&str>) -> String {
     }
 }
 
-pub(crate) fn format_file_base(
+pub(crate) fn format_output_paths(
     template: &str,
     movie: &Movie,
     fallback: &str,
-) -> Result<String, AppError> {
-    let rendered = render_template(template, movie)?;
-    let resolved = if rendered.trim().is_empty() {
-        fallback
-    } else {
-        rendered.as_str()
-    };
-    let sanitized = sanitize_component(resolved);
-    if sanitized.is_empty() {
-        return Err(AppError::TemplateEmpty {
-            template: template.to_string(),
-        });
+) -> Result<Vec<PathBuf>, AppError> {
+    let default_render = render_template(template, movie)?;
+    let mut paths = Vec::new();
+    let mut seen = HashSet::new();
+    for actor in &movie.actor {
+        let rendered = render_template_with_meta(template, movie, Some(actor))?;
+        if rendered.rendered.trim().is_empty() {
+            continue;
+        }
+        let path = format_output_path_resolved(template, &rendered.rendered)?;
+        if seen.insert(path.clone()) {
+            paths.push(path);
+        }
     }
-    Ok(sanitized)
+    if paths.is_empty() {
+        let genre_paths = format_genre_output_paths(template, movie, &mut seen)?;
+        if !genre_paths.is_empty() {
+            paths.extend(genre_paths);
+        }
+    }
+    if paths.is_empty() {
+        let resolved = if default_render.trim().is_empty() {
+            fallback
+        } else {
+            default_render.as_str()
+        };
+        let path = format_output_path_resolved(template, resolved)?;
+        paths.push(path);
+    }
+    Ok(paths)
 }
 
-pub(crate) fn format_folder_path(
+fn format_genre_output_paths(
     template: &str,
     movie: &Movie,
-    fallback: &str,
-) -> Result<PathBuf, AppError> {
-    let path =
-        format_folder_path_with_actor(template, movie, Some(fallback), None)?.ok_or_else(|| {
-            AppError::TemplateEmpty {
-                template: template.to_string(),
-            }
-        })?;
-    Ok(path)
+    seen: &mut HashSet<PathBuf>,
+) -> Result<Vec<PathBuf>, AppError> {
+    if movie.genre.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut paths = Vec::new();
+    for genre in &movie.genre {
+        let trimmed = genre.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let mut scoped = movie.clone();
+        scoped.genre = vec![trimmed.to_string()];
+        let rendered = render_template(template, &scoped)?;
+        if rendered.trim().is_empty() {
+            continue;
+        }
+        let path = format_output_path_resolved(template, &rendered)?;
+        if seen.insert(path.clone()) {
+            paths.push(path);
+        }
+    }
+    Ok(paths)
 }
 
 pub(crate) fn format_input_name(input: &str, remove: &[String]) -> Result<String, AppError> {
@@ -209,32 +240,31 @@ fn uniqueid_by_type(movie: &Movie, id_type: &str) -> Option<String> {
         .and_then(|entry| entry.value.clone())
 }
 
-fn format_folder_path_with_actor(
-    template: &str,
-    movie: &Movie,
-    fallback: Option<&str>,
-    actor: Option<&Actor>,
-) -> Result<Option<PathBuf>, AppError> {
-    let rendered = render_template_with_meta(template, movie, actor)?;
-    let resolved = if rendered.rendered.trim().is_empty() {
-        match fallback {
-            Some(value) => value.to_string(),
-            None => return Ok(None),
-        }
-    } else {
-        rendered.rendered
-    };
-    format_folder_path_resolved(template, &resolved).map(Some)
-}
-
-fn format_folder_path_resolved(template: &str, resolved: &str) -> Result<PathBuf, AppError> {
-    if Path::new(resolved).is_absolute() {
-        return Err(AppError::TemplateAbsolutePath {
+fn format_output_path_resolved(template: &str, resolved: &str) -> Result<PathBuf, AppError> {
+    let trimmed = resolved.trim();
+    if trimmed.is_empty() {
+        return Err(AppError::TemplateEmpty {
             template: template.to_string(),
         });
     }
+
     let mut path = PathBuf::new();
-    for segment in resolved.split('/') {
+    let mut segments = trimmed.split('/').peekable();
+    if let Some(first) = segments.peek() {
+        if first.is_empty() {
+            path.push(Path::new("/"));
+            segments.next();
+        } else if cfg!(windows) && is_windows_drive_prefix(first) {
+            let drive = segments.next().unwrap_or_default();
+            path.push(format!("{drive}\\"));
+            if matches!(segments.peek(), Some(next) if next.is_empty()) {
+                segments.next();
+            }
+        }
+    }
+
+    let mut sanitized_segments = Vec::new();
+    for segment in segments {
         if segment.is_empty() {
             continue;
         }
@@ -250,14 +280,27 @@ fn format_folder_path_resolved(template: &str, resolved: &str) -> Result<PathBuf
                 reason: format!("invalid path segment {sanitized:?}"),
             });
         }
-        path.push(sanitized);
+        sanitized_segments.push(sanitized);
     }
-    if path.as_os_str().is_empty() {
+
+    if sanitized_segments.is_empty() {
         return Err(AppError::TemplateEmpty {
             template: template.to_string(),
         });
     }
+
+    let file_name = sanitized_segments.pop().unwrap_or_default();
+    for segment in sanitized_segments {
+        path.push(segment);
+    }
+    path.push(file_name);
+
     Ok(path)
+}
+
+fn is_windows_drive_prefix(segment: &str) -> bool {
+    let bytes = segment.as_bytes();
+    bytes.len() == 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':'
 }
 
 fn sanitize_component(value: &str) -> String {
