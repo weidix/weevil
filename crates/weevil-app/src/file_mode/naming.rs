@@ -1,7 +1,15 @@
+mod actor;
+
 use std::path::{Path, PathBuf};
 
 use crate::errors::AppError;
 use crate::nfo::{Actor, Movie};
+
+use actor::{parse_actor_field, render_actor_field};
+
+struct TemplateRender {
+    rendered: String,
+}
 
 pub(crate) fn build_file_name(base: &str, extension: Option<&str>) -> String {
     match extension {
@@ -35,41 +43,12 @@ pub(crate) fn format_folder_path(
     movie: &Movie,
     fallback: &str,
 ) -> Result<PathBuf, AppError> {
-    let rendered = render_template(template, movie)?;
-    let resolved = if rendered.trim().is_empty() {
-        fallback.to_string()
-    } else {
-        rendered
-    };
-    if Path::new(&resolved).is_absolute() {
-        return Err(AppError::TemplateAbsolutePath {
-            template: template.to_string(),
-        });
-    }
-    let mut path = PathBuf::new();
-    for segment in resolved.split('/') {
-        if segment.is_empty() {
-            continue;
-        }
-        let sanitized = sanitize_component(segment);
-        if sanitized.is_empty() {
-            return Err(AppError::TemplateEmptySegment {
+    let path =
+        format_folder_path_with_actor(template, movie, Some(fallback), None)?.ok_or_else(|| {
+            AppError::TemplateEmpty {
                 template: template.to_string(),
-            });
-        }
-        if sanitized == "." || sanitized == ".." {
-            return Err(AppError::TemplateInvalid {
-                template: template.to_string(),
-                reason: format!("invalid path segment {sanitized:?}"),
-            });
-        }
-        path.push(sanitized);
-    }
-    if path.as_os_str().is_empty() {
-        return Err(AppError::TemplateEmpty {
-            template: template.to_string(),
-        });
-    }
+            }
+        })?;
     Ok(path)
 }
 
@@ -97,7 +76,15 @@ pub(crate) fn format_input_name(input: &str, remove: &[String]) -> Result<String
     Ok(cleaned)
 }
 
-fn render_template(template: &str, movie: &Movie) -> Result<String, AppError> {
+pub(crate) fn render_template(template: &str, movie: &Movie) -> Result<String, AppError> {
+    render_template_with_meta(template, movie, None).map(|rendered| rendered.rendered)
+}
+
+fn render_template_with_meta(
+    template: &str,
+    movie: &Movie,
+    actor: Option<&Actor>,
+) -> Result<TemplateRender, AppError> {
     let mut out = String::new();
     let mut chars = template.chars().peekable();
     while let Some(ch) = chars.next() {
@@ -130,9 +117,15 @@ fn render_template(template: &str, movie: &Movie) -> Result<String, AppError> {
                         reason: "empty field".to_string(),
                     });
                 }
-                let value = lookup_field(movie, field, template)?;
-                if let Some(value) = value {
-                    out.push_str(&value);
+                if let Some(spec) = parse_actor_field(field, template)? {
+                    if let Some(value) = render_actor_field(&movie.actor, actor, &spec) {
+                        out.push_str(&value);
+                    }
+                } else {
+                    let value = lookup_field(movie, field, template)?;
+                    if let Some(value) = value {
+                        out.push_str(&value);
+                    }
                 }
             }
             '}' => {
@@ -149,7 +142,7 @@ fn render_template(template: &str, movie: &Movie) -> Result<String, AppError> {
             other => out.push(other),
         }
     }
-    Ok(out)
+    Ok(TemplateRender { rendered: out })
 }
 
 fn lookup_field(movie: &Movie, field: &str, template: &str) -> Result<Option<String>, AppError> {
@@ -175,8 +168,6 @@ fn lookup_field(movie: &Movie, field: &str, template: &str) -> Result<Option<Str
         "tag" => join_list(&movie.tag),
         "country" => join_list(&movie.country),
         "credits" => join_list(&movie.credits),
-        "actor" => join_actor_names(&movie.actor),
-        "actor.gender" => join_actor_genders(&movie.actor),
         "uniqueid" => select_uniqueid(movie),
         _ if field.starts_with("uniqueid.") => {
             let id_type = field.trim_start_matches("uniqueid.");
@@ -200,42 +191,6 @@ fn join_list(values: &[String]) -> Option<String> {
     }
 }
 
-fn join_actor_names(actors: &[Actor]) -> Option<String> {
-    if actors.is_empty() {
-        return None;
-    }
-    let mut names = Vec::new();
-    for actor in actors {
-        if let Some(name) = actor.name.as_ref() {
-            names.push(name.clone());
-        }
-    }
-    if names.is_empty() {
-        None
-    } else {
-        Some(names.join(", "))
-    }
-}
-
-fn join_actor_genders(actors: &[Actor]) -> Option<String> {
-    if actors.is_empty() {
-        return None;
-    }
-    let mut genders = Vec::new();
-    for actor in actors {
-        if let Some(gender) = actor.gender.as_ref() {
-            if !gender.trim().is_empty() {
-                genders.push(gender.trim().to_string());
-            }
-        }
-    }
-    if genders.is_empty() {
-        None
-    } else {
-        Some(genders.join(", "))
-    }
-}
-
 fn select_uniqueid(movie: &Movie) -> Option<String> {
     let default = movie
         .uniqueid
@@ -252,6 +207,57 @@ fn uniqueid_by_type(movie: &Movie, id_type: &str) -> Option<String> {
         .iter()
         .find(|entry| entry.id_type.as_deref() == Some(id_type))
         .and_then(|entry| entry.value.clone())
+}
+
+fn format_folder_path_with_actor(
+    template: &str,
+    movie: &Movie,
+    fallback: Option<&str>,
+    actor: Option<&Actor>,
+) -> Result<Option<PathBuf>, AppError> {
+    let rendered = render_template_with_meta(template, movie, actor)?;
+    let resolved = if rendered.rendered.trim().is_empty() {
+        match fallback {
+            Some(value) => value.to_string(),
+            None => return Ok(None),
+        }
+    } else {
+        rendered.rendered
+    };
+    format_folder_path_resolved(template, &resolved).map(Some)
+}
+
+fn format_folder_path_resolved(template: &str, resolved: &str) -> Result<PathBuf, AppError> {
+    if Path::new(resolved).is_absolute() {
+        return Err(AppError::TemplateAbsolutePath {
+            template: template.to_string(),
+        });
+    }
+    let mut path = PathBuf::new();
+    for segment in resolved.split('/') {
+        if segment.is_empty() {
+            continue;
+        }
+        let sanitized = sanitize_component(segment);
+        if sanitized.is_empty() {
+            return Err(AppError::TemplateEmptySegment {
+                template: template.to_string(),
+            });
+        }
+        if sanitized == "." || sanitized == ".." {
+            return Err(AppError::TemplateInvalid {
+                template: template.to_string(),
+                reason: format!("invalid path segment {sanitized:?}"),
+            });
+        }
+        path.push(sanitized);
+    }
+    if path.as_os_str().is_empty() {
+        return Err(AppError::TemplateEmpty {
+            template: template.to_string(),
+        });
+    }
+    Ok(path)
 }
 
 fn sanitize_component(value: &str) -> String {

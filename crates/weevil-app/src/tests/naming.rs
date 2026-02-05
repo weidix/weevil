@@ -66,6 +66,54 @@ fn render_template_actor_gender() {
 }
 
 #[test]
+fn render_template_actor_filters_by_gender() {
+    let movie = Movie {
+        actor: vec![
+            Actor {
+                name: Some("Alice".to_string()),
+                gender: Some("female".to_string()),
+                ..Actor::default()
+            },
+            Actor {
+                name: Some("Bob".to_string()),
+                gender: Some("male".to_string()),
+                ..Actor::default()
+            },
+        ],
+        ..Movie::default()
+    };
+    let rendered = render_template("{actor[gender=female]}", &movie).expect("template");
+    assert_eq!(rendered, "Alice");
+}
+
+#[test]
+fn render_template_actor_role_and_order() {
+    let movie = Movie {
+        actor: vec![
+            Actor {
+                name: Some("Alice".to_string()),
+                role: Some("Lead".to_string()),
+                order: Some(1),
+                ..Actor::default()
+            },
+            Actor {
+                name: Some("Bob".to_string()),
+                role: Some("Support".to_string()),
+                order: Some(2),
+                ..Actor::default()
+            },
+        ],
+        ..Movie::default()
+    };
+    let roles = render_template("{actor.role}", &movie).expect("template");
+    assert_eq!(roles, "Lead, Support");
+    let orders = render_template("{actor.order}", &movie).expect("template");
+    assert_eq!(orders, "1, 2");
+    let filtered = render_template("{actor[order=2]}", &movie).expect("template");
+    assert_eq!(filtered, "Bob");
+}
+
+#[test]
 fn format_input_name_removes_tokens_and_collapses_whitespace() {
     let formatted = format_input_name(
         "Movie 1080p   WEB-DL",
