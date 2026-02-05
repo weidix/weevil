@@ -25,24 +25,70 @@ pub(crate) fn format_output_paths(
     fallback: &str,
 ) -> Result<Vec<PathBuf>, AppError> {
     let default_render = render_template(template, movie)?;
-    let mut paths = Vec::new();
-    let mut seen = HashSet::new();
-    for actor in &movie.actor {
-        let rendered = render_template_with_meta(template, movie, Some(actor))?;
-        if rendered.rendered.trim().is_empty() {
+    let fields = collect_template_fields(template)?;
+    let mut expand_actor = false;
+    let mut expand_genre = false;
+    let mut expand_tag = false;
+    let mut expand_country = false;
+    let mut expand_credits = false;
+    for field in &fields {
+        if parse_actor_field(field, template)?.is_some() {
+            expand_actor = true;
             continue;
         }
-        let path = format_output_path_resolved(template, &rendered.rendered)?;
-        if seen.insert(path.clone()) {
-            paths.push(path);
+        match field.as_str() {
+            "genre" => expand_genre = true,
+            "tag" => expand_tag = true,
+            "country" => expand_country = true,
+            "credits" => expand_credits = true,
+            _ => {}
         }
     }
-    if paths.is_empty() {
-        let genre_paths = format_genre_output_paths(template, movie, &mut seen)?;
-        if !genre_paths.is_empty() {
-            paths.extend(genre_paths);
+
+    let mut paths = Vec::new();
+    let mut seen = HashSet::new();
+    let actor_options: Vec<Option<&Actor>> = if expand_actor {
+        movie.actor.iter().map(Some).collect()
+    } else {
+        vec![None]
+    };
+    let genre_values = list_values(expand_genre, &movie.genre);
+    let tag_values = list_values(expand_tag, &movie.tag);
+    let country_values = list_values(expand_country, &movie.country);
+    let credits_values = list_values(expand_credits, &movie.credits);
+
+    for actor in actor_options {
+        for genre in &genre_values {
+            for tag in &tag_values {
+                for country in &country_values {
+                    for credits in &credits_values {
+                        let mut scoped = movie.clone();
+                        if let Some(value) = genre.as_ref() {
+                            scoped.genre = vec![value.clone()];
+                        }
+                        if let Some(value) = tag.as_ref() {
+                            scoped.tag = vec![value.clone()];
+                        }
+                        if let Some(value) = country.as_ref() {
+                            scoped.country = vec![value.clone()];
+                        }
+                        if let Some(value) = credits.as_ref() {
+                            scoped.credits = vec![value.clone()];
+                        }
+                        let rendered = render_template_with_meta(template, &scoped, actor)?;
+                        if rendered.rendered.trim().is_empty() {
+                            continue;
+                        }
+                        let path = format_output_path_resolved(template, &rendered.rendered)?;
+                        if seen.insert(path.clone()) {
+                            paths.push(path);
+                        }
+                    }
+                }
+            }
         }
     }
+
     if paths.is_empty() {
         let resolved = if default_render.trim().is_empty() {
             fallback
@@ -55,32 +101,66 @@ pub(crate) fn format_output_paths(
     Ok(paths)
 }
 
-fn format_genre_output_paths(
-    template: &str,
-    movie: &Movie,
-    seen: &mut HashSet<PathBuf>,
-) -> Result<Vec<PathBuf>, AppError> {
-    if movie.genre.is_empty() {
-        return Ok(Vec::new());
+fn list_values(expand: bool, values: &[String]) -> Vec<Option<String>> {
+    if !expand {
+        return vec![None];
     }
-    let mut paths = Vec::new();
-    for genre in &movie.genre {
-        let trimmed = genre.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        let mut scoped = movie.clone();
-        scoped.genre = vec![trimmed.to_string()];
-        let rendered = render_template(template, &scoped)?;
-        if rendered.trim().is_empty() {
-            continue;
-        }
-        let path = format_output_path_resolved(template, &rendered)?;
-        if seen.insert(path.clone()) {
-            paths.push(path);
+    values
+        .iter()
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .map(|value| Some(value.to_string()))
+        .collect()
+}
+
+fn collect_template_fields(template: &str) -> Result<Vec<String>, AppError> {
+    let mut fields = Vec::new();
+    let mut chars = template.chars().peekable();
+    while let Some(ch) = chars.next() {
+        match ch {
+            '{' => {
+                if matches!(chars.peek(), Some('{')) {
+                    chars.next();
+                    continue;
+                }
+                let mut key = String::new();
+                let mut closed = false;
+                while let Some(next) = chars.next() {
+                    if next == '}' {
+                        closed = true;
+                        break;
+                    }
+                    key.push(next);
+                }
+                if !closed {
+                    return Err(AppError::TemplateInvalid {
+                        template: template.to_string(),
+                        reason: "missing closing '}'".to_string(),
+                    });
+                }
+                let field = key.trim();
+                if field.is_empty() {
+                    return Err(AppError::TemplateInvalid {
+                        template: template.to_string(),
+                        reason: "empty field".to_string(),
+                    });
+                }
+                fields.push(field.to_string());
+            }
+            '}' => {
+                if matches!(chars.peek(), Some('}')) {
+                    chars.next();
+                } else {
+                    return Err(AppError::TemplateInvalid {
+                        template: template.to_string(),
+                        reason: "unmatched '}'".to_string(),
+                    });
+                }
+            }
+            _ => {}
         }
     }
-    Ok(paths)
+    Ok(fields)
 }
 
 pub(crate) fn format_input_name(input: &str, remove: &[String]) -> Result<String, AppError> {

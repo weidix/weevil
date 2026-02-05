@@ -78,6 +78,55 @@ fn format_output_paths_expands_genre_list() {
 }
 
 #[test]
+fn format_output_paths_expands_multiple_list_fields() {
+    let movie = Movie {
+        title: Some("Example".to_string()),
+        genre: vec!["Action".to_string(), "Drama".to_string()],
+        tag: vec!["HD".to_string(), "4K".to_string()],
+        ..Movie::default()
+    };
+    let paths = format_output_paths("{genre}/{tag}/{title}", &movie, "fallback").expect("paths");
+    assert_eq!(
+        paths,
+        vec![
+            PathBuf::from("Action").join("HD").join("Example"),
+            PathBuf::from("Action").join("4K").join("Example"),
+            PathBuf::from("Drama").join("HD").join("Example"),
+            PathBuf::from("Drama").join("4K").join("Example")
+        ]
+    );
+}
+
+#[test]
+fn format_output_paths_expands_actor_and_genre() {
+    let movie = Movie {
+        title: Some("Example".to_string()),
+        genre: vec!["Action".to_string(), "Drama".to_string()],
+        actor: vec![
+            Actor {
+                name: Some("Alice".to_string()),
+                ..Actor::default()
+            },
+            Actor {
+                name: Some("Bob".to_string()),
+                ..Actor::default()
+            },
+        ],
+        ..Movie::default()
+    };
+    let paths = format_output_paths("{genre}/{actor}/{title}", &movie, "fallback").expect("paths");
+    assert_eq!(
+        paths,
+        vec![
+            PathBuf::from("Action").join("Alice").join("Example"),
+            PathBuf::from("Drama").join("Alice").join("Example"),
+            PathBuf::from("Action").join("Bob").join("Example"),
+            PathBuf::from("Drama").join("Bob").join("Example")
+        ]
+    );
+}
+
+#[test]
 fn format_output_paths_falls_back_when_actor_filters_match_none() {
     let movie = Movie {
         actor: vec![Actor {

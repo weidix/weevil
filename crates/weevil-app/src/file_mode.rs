@@ -35,21 +35,9 @@ pub(crate) fn run_file_mode(
     let movie: Movie = from_str(&xml).map_err(AppError::NfoParse)?;
 
     let output_paths = format_output_paths(output_template, &movie, &input_stem)?;
-    let mut output_iter = output_paths.into_iter();
-    let primary_output = output_iter.next().ok_or_else(|| AppError::TemplateEmpty {
-        template: output_template.to_string(),
-    })?;
-    let extra_paths = if matches!(folder_multi, MultiFolderStrategy::First) {
-        Vec::new()
-    } else {
-        output_iter.collect()
-    };
-
-    let primary_output = split_output_path(&primary_output, output_template)?;
-    let extra_outputs = extra_paths
-        .iter()
-        .map(|path| split_output_path(path, output_template))
-        .collect::<Result<Vec<_>, AppError>>()?;
+    let selected = select_output_paths(output_paths, output_template, folder_multi)?;
+    let primary_output = selected.primary;
+    let extra_outputs = selected.extras;
 
     ensure_output_dir(&primary_output.dir)?;
     for output in &extra_outputs {
@@ -122,9 +110,34 @@ struct OutputTargets {
     subtitles: Vec<PathBuf>,
 }
 
+struct SelectedOutputs {
+    primary: OutputPath,
+    extras: Vec<OutputPath>,
+}
+
 struct OutputPath {
     dir: PathBuf,
     file_base: String,
+}
+
+fn select_output_paths(
+    output_paths: Vec<PathBuf>,
+    template: &str,
+    strategy: MultiFolderStrategy,
+) -> Result<SelectedOutputs, AppError> {
+    let mut output_iter = output_paths.into_iter();
+    let primary = output_iter.next().ok_or_else(|| AppError::TemplateEmpty {
+        template: template.to_string(),
+    })?;
+    let primary = split_output_path(&primary, template)?;
+    let extras = if matches!(strategy, MultiFolderStrategy::First) {
+        Vec::new()
+    } else {
+        output_iter
+            .map(|path| split_output_path(&path, template))
+            .collect::<Result<Vec<_>, AppError>>()?
+    };
+    Ok(SelectedOutputs { primary, extras })
 }
 
 fn split_output_path(path: &Path, template: &str) -> Result<OutputPath, AppError> {
