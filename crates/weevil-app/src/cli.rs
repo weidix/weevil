@@ -39,6 +39,13 @@ pub(crate) enum Command {
         script: PathBuf,
         #[arg(long, short = 'o', value_name = "OUTPUT_DIR")]
         output_dir: PathBuf,
+        #[arg(
+            long,
+            value_name = "REMOVE",
+            value_delimiter = ',',
+            help = "Comma-separated tokens to remove from the input filename before passing to Lua."
+        )]
+        input_name_remove: Vec<String>,
         #[arg(long, value_name = "FORMAT", default_value = "")]
         file_format: String,
         #[arg(long, value_name = "FORMAT", default_value = "")]

@@ -73,6 +73,30 @@ pub(crate) fn format_folder_path(
     Ok(path)
 }
 
+pub(crate) fn format_input_name(input: &str, remove: &[String]) -> Result<String, AppError> {
+    if remove.is_empty() {
+        return Ok(input.to_string());
+    }
+
+    let mut current = input.to_string();
+    for token in remove {
+        let trimmed = token.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        current = current.replace(trimmed, "");
+    }
+
+    let cleaned = collapse_whitespace(&current);
+    if cleaned.is_empty() {
+        return Err(AppError::InputNameFormatEmpty {
+            input: input.to_string(),
+            rules: remove.to_vec(),
+        });
+    }
+    Ok(cleaned)
+}
+
 fn render_template(template: &str, movie: &Movie) -> Result<String, AppError> {
     let mut out = String::new();
     let mut chars = template.chars().peekable();
@@ -152,6 +176,7 @@ fn lookup_field(movie: &Movie, field: &str, template: &str) -> Result<Option<Str
         "country" => join_list(&movie.country),
         "credits" => join_list(&movie.credits),
         "actor" => join_actor_names(&movie.actor),
+        "actor.gender" => join_actor_genders(&movie.actor),
         "uniqueid" => select_uniqueid(movie),
         _ if field.starts_with("uniqueid.") => {
             let id_type = field.trim_start_matches("uniqueid.");
@@ -189,6 +214,25 @@ fn join_actor_names(actors: &[Actor]) -> Option<String> {
         None
     } else {
         Some(names.join(", "))
+    }
+}
+
+fn join_actor_genders(actors: &[Actor]) -> Option<String> {
+    if actors.is_empty() {
+        return None;
+    }
+    let mut genders = Vec::new();
+    for actor in actors {
+        if let Some(gender) = actor.gender.as_ref() {
+            if !gender.trim().is_empty() {
+                genders.push(gender.trim().to_string());
+            }
+        }
+    }
+    if genders.is_empty() {
+        None
+    } else {
+        Some(genders.join(", "))
     }
 }
 
@@ -232,6 +276,23 @@ fn sanitize_component(value: &str) -> String {
         last_space = false;
     }
     out.trim().trim_matches('.').to_string()
+}
+
+fn collapse_whitespace(value: &str) -> String {
+    let mut out = String::new();
+    let mut last_space = false;
+    for ch in value.chars() {
+        if ch.is_whitespace() {
+            if !last_space {
+                out.push(' ');
+                last_space = true;
+            }
+            continue;
+        }
+        out.push(ch);
+        last_space = false;
+    }
+    out.trim().to_string()
 }
 
 #[cfg(test)]

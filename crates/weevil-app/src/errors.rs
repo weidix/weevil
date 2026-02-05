@@ -79,6 +79,10 @@ pub(crate) enum AppError {
     TemplateAbsolutePath {
         template: String,
     },
+    InputNameFormatEmpty {
+        input: String,
+        rules: Vec<String>,
+    },
 }
 
 impl AppError {
@@ -183,6 +187,12 @@ impl fmt::Display for AppError {
             }
             AppError::TemplateAbsolutePath { template } => {
                 write!(f, "template {template:?} resolved to an absolute path")
+            }
+            AppError::InputNameFormatEmpty { input, rules } => {
+                write!(
+                    f,
+                    "input filename {input:?} resolved to empty after applying remove rules {rules:?}"
+                )
             }
         }
     }

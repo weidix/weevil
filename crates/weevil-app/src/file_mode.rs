@@ -10,7 +10,7 @@ use weevil_lua::LuaPlugin;
 
 mod naming;
 
-use naming::{build_file_name, format_file_base, format_folder_path};
+use naming::{build_file_name, format_file_base, format_folder_path, format_input_name};
 
 const DEFAULT_FILE_TEMPLATE: &str = "{title}";
 const DEFAULT_FOLDER_TEMPLATE: &str = "{title}";
@@ -19,18 +19,20 @@ pub(crate) fn run_file_mode(
     input: &Path,
     script: &Path,
     output_dir: &Path,
+    input_name_remove: &[String],
     file_format: &str,
     folder_format: &str,
 ) -> Result<(), AppError> {
     ensure_input_file(input)?;
     let input_stem = file_stem_string(input)?;
+    let input_name = format_input_name(&input_stem, input_name_remove)?;
     let input_path = path_to_string(input)?;
 
     let task = TaskContext::new("file");
     let plugin = LuaPlugin::from_file(script).map_err(AppError::LuaPlugin)?;
     plugin.set_log_context(task.id.clone(), task.kind);
     let value = plugin
-        .call((input_stem.as_str(), input_path.as_str()))
+        .call((input_name.as_str(), input_path.as_str()))
         .map_err(AppError::LuaPlugin)?;
     let xml = render_nfo_output(value, plugin.lua())?;
     let movie: Movie = from_str(&xml).map_err(AppError::NfoParse)?;

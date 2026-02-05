@@ -23,9 +23,17 @@ pub(crate) fn run() -> Result<(), AppError> {
             input,
             script,
             output_dir,
+            input_name_remove,
             file_format,
             folder_format,
-        } => file_mode::run_file_mode(&input, &script, &output_dir, &file_format, &folder_format),
+        } => file_mode::run_file_mode(
+            &input,
+            &script,
+            &output_dir,
+            &input_name_remove,
+            &file_format,
+            &folder_format,
+        ),
         Command::Dir => Err(AppError::NotImplemented { mode: "dir" }),
         Command::Watch => Err(AppError::NotImplemented { mode: "watch" }),
     }

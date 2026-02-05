@@ -66,6 +66,32 @@ fn parse_file_mode() {
 }
 
 #[test]
+fn parse_file_mode_input_name_remove() {
+    let cli = Cli::try_parse_from([
+        "weevil",
+        "file",
+        "--input",
+        "movie.mkv",
+        "--script",
+        "script.lua",
+        "--output-dir",
+        "output",
+        "--input-name-remove",
+        "1080p,WEB-DL",
+    ])
+    .expect("expected command");
+
+    if let Command::File {
+        input_name_remove, ..
+    } = cli.command
+    {
+        assert_eq!(input_name_remove, vec!["1080p", "WEB-DL"]);
+    } else {
+        panic!("expected file command");
+    }
+}
+
+#[test]
 fn parse_extra_args() {
     let error = Cli::try_parse_from([
         "weevil",

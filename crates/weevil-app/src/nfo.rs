@@ -99,5 +99,6 @@ pub struct SetInfo {
 pub struct Actor {
     pub name: Option<String>,
     pub role: Option<String>,
+    pub gender: Option<String>,
     pub order: Option<u32>,
 }

@@ -43,3 +43,40 @@ fn sanitize_component_replaces_illegal_chars() {
     let sanitized = sanitize_component("A/B:C*");
     assert_eq!(sanitized, "A_B_C_");
 }
+
+#[test]
+fn render_template_actor_gender() {
+    let movie = Movie {
+        actor: vec![
+            Actor {
+                name: Some("Alice".to_string()),
+                gender: Some("female".to_string()),
+                ..Actor::default()
+            },
+            Actor {
+                name: Some("Bob".to_string()),
+                gender: Some("male".to_string()),
+                ..Actor::default()
+            },
+        ],
+        ..Movie::default()
+    };
+    let rendered = render_template("{actor.gender}", &movie).expect("template");
+    assert_eq!(rendered, "female, male");
+}
+
+#[test]
+fn format_input_name_removes_tokens_and_collapses_whitespace() {
+    let formatted = format_input_name(
+        "Movie 1080p   WEB-DL",
+        &vec!["1080p".to_string(), "WEB-DL".to_string()],
+    )
+    .expect("formatted");
+    assert_eq!(formatted, "Movie");
+}
+
+#[test]
+fn format_input_name_empty_is_error() {
+    let error = format_input_name("1080p", &vec!["1080p".to_string()]).expect_err("expected error");
+    assert!(matches!(error, AppError::InputNameFormatEmpty { .. }));
+}
