@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 
 use clap::{Parser, Subcommand};
 use mlua::{LuaSerdeExt, Value};
+use serde::Serialize;
 use weevil_lua::LuaPlugin;
 
 fn main() {
@@ -50,8 +51,13 @@ fn render_nfo_output(value: Option<Value>, lua: &mlua::Lua) -> Result<String, Ap
         }
         Value::Table(_) => {
             let movie: nfo::Movie = lua.from_value(value).map_err(AppError::LuaValue)?;
-            let xml = quick_xml::se::to_string(&movie).map_err(AppError::SerializeNfo)?;
-            Ok(xml)
+            let mut buffer = String::new();
+            let mut serializer = quick_xml::se::Serializer::new(&mut buffer);
+            serializer.indent(' ', 2);
+            movie
+                .serialize(serializer)
+                .map_err(AppError::SerializeNfo)?;
+            Ok(buffer)
         }
         other => Err(AppError::ScriptReturnedUnexpected {
             kind: value_kind(&other).to_string(),
@@ -344,6 +350,8 @@ mod tests {
         let xml = render_nfo_output(Some(value), &lua).expect("expected xml");
         assert!(xml.contains("<movie>"));
         assert!(xml.contains("<title>Spirited Away</title>"));
+        assert!(xml.contains("\n"));
+        assert!(xml.contains("\n  <title>Spirited Away</title>\n"));
     }
 
     #[test]

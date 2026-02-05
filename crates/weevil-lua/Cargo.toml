@@ -10,7 +10,7 @@ json = ["dep:serde_json"]
 
 [dependencies]
 mlua = { version = "0.11", features = ["lua55", "vendored"] }
-reqwest = { version = "0.13", default-features = false, features = ["blocking", "rustls"] }
+reqwest = { version = "0.13", default-features = false, features = ["blocking", "http2", "rustls"] }
 serde_json = { version = "1", optional = true }
 thiserror = "2"
 url = "2"

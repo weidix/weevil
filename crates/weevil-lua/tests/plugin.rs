@@ -66,7 +66,7 @@ fn http_rejects_non_string_header_name() {
 return {
   trusted_urls = { "https://example.com/" },
   run = function()
-    return weevil.http.get_with_headers("https://example.com/", { [1] = "value" })
+    return weevil.http.get("https://example.com/", { headers = { [1] = "value" } })
   end
 }
 "#;
@@ -84,7 +84,7 @@ fn http_rejects_non_string_header_value() {
 return {
   trusted_urls = { "https://example.com/" },
   run = function()
-    return weevil.http.get_with_headers("https://example.com/", { ["user-agent"] = 123 })
+    return weevil.http.get("https://example.com/", { headers = { ["user-agent"] = 123 } })
   end
 }
 "#;
@@ -94,6 +94,36 @@ return {
         err.to_string()
             .contains("HTTP header user-agent must be a string value")
     );
+}
+
+#[test]
+fn http_rejects_non_string_version() {
+    let script = r#"
+return {
+  trusted_urls = { "https://example.com/" },
+  run = function()
+    return weevil.http.get("https://example.com/", { version = 2 })
+  end
+}
+"#;
+    let plugin = LuaPlugin::from_str(&script).expect("load plugin");
+    let err = plugin.call(()).expect_err("should fail");
+    assert!(err.to_string().contains("HTTP version must be a string"));
+}
+
+#[test]
+fn http_rejects_unsupported_version() {
+    let script = r#"
+return {
+  trusted_urls = { "https://example.com/" },
+  run = function()
+    return weevil.http.get("https://example.com/", { version = "3" })
+  end
+}
+"#;
+    let plugin = LuaPlugin::from_str(&script).expect("load plugin");
+    let err = plugin.call(()).expect_err("should fail");
+    assert!(err.to_string().contains("HTTP version 3 is not supported"));
 }
 
 #[test]

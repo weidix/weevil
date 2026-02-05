@@ -1,10 +1,11 @@
 use std::sync::Arc;
 
 use mlua::{Lua, Table, Value};
+use reqwest::Version;
 use weevil_core::{HtmlTree, Selector, XPath};
 
 use crate::error::LuaPluginError;
-use crate::http::HttpClient;
+use crate::http::{HttpClient, HttpRequestOptions};
 #[cfg(feature = "json")]
 use crate::lua::json::build_json_table;
 use crate::lua::types::{LuaHtmlTree, LuaSelector, LuaXPath};
@@ -130,27 +131,14 @@ fn build_http_table(lua: &Lua, http_mode: HttpMode) -> Result<Table, LuaPluginEr
         HttpMode::Disabled => {
             http.set(
                 "get",
-                lua.create_function(|_, _: String| -> mlua::Result<String> {
-                    Err(mlua::Error::external(LuaPluginError::HttpDisabled))
-                })?,
-            )?;
-            http.set(
-                "get_with_headers",
-                lua.create_function(|_, _: (String, Table)| -> mlua::Result<String> {
+                lua.create_function(|_, _: mlua::Variadic<Value>| -> mlua::Result<String> {
                     Err(mlua::Error::external(LuaPluginError::HttpDisabled))
                 })?,
             )?;
             #[cfg(feature = "async")]
             http.set(
                 "get_async",
-                lua.create_async_function(|_, _: String| async move {
-                    Err::<String, _>(mlua::Error::external(LuaPluginError::HttpDisabled))
-                })?,
-            )?;
-            #[cfg(feature = "async")]
-            http.set(
-                "get_async_with_headers",
-                lua.create_async_function(|_, _: (String, Table)| async move {
+                lua.create_async_function(|_, _: mlua::Variadic<Value>| async move {
                     Err::<String, _>(mlua::Error::external(LuaPluginError::HttpDisabled))
                 })?,
             )?;
@@ -159,17 +147,10 @@ fn build_http_table(lua: &Lua, http_mode: HttpMode) -> Result<Table, LuaPluginEr
             let blocking = client.clone();
             http.set(
                 "get",
-                lua.create_function(move |_, url: String| {
-                    blocking.get_blocking(&url).map_err(mlua::Error::external)
-                })?,
-            )?;
-            let blocking = client.clone();
-            http.set(
-                "get_with_headers",
-                lua.create_function(move |_, (url, headers): (String, Table)| {
-                    let headers = parse_header_table(headers).map_err(mlua::Error::external)?;
+                lua.create_function(move |_, (url, options): (String, Option<Value>)| {
+                    let options = parse_http_options(options).map_err(mlua::Error::external)?;
                     blocking
-                        .get_blocking_with_headers(&url, &headers)
+                        .get_blocking(&url, &options)
                         .map_err(mlua::Error::external)
                 })?,
             )?;
@@ -178,35 +159,93 @@ fn build_http_table(lua: &Lua, http_mode: HttpMode) -> Result<Table, LuaPluginEr
                 let async_client = client.clone();
                 http.set(
                     "get_async",
-                    lua.create_async_function(move |_, url: String| {
-                        let async_client = async_client.clone();
-                        async move {
-                            async_client
-                                .get_async(&url)
-                                .await
-                                .map_err(mlua::Error::external)
-                        }
-                    })?,
-                )?;
-                let async_client = client.clone();
-                http.set(
-                    "get_async_with_headers",
-                    lua.create_async_function(move |_, (url, headers): (String, Table)| {
-                        let async_client = async_client.clone();
-                        async move {
-                            let headers =
-                                parse_header_table(headers).map_err(mlua::Error::external)?;
-                            async_client
-                                .get_async_with_headers(&url, &headers)
-                                .await
-                                .map_err(mlua::Error::external)
-                        }
-                    })?,
+                    lua.create_async_function(
+                        move |_, (url, options): (String, Option<Value>)| {
+                            let async_client = async_client.clone();
+                            async move {
+                                let options =
+                                    parse_http_options(options).map_err(mlua::Error::external)?;
+                                async_client
+                                    .get_async(&url, &options)
+                                    .await
+                                    .map_err(mlua::Error::external)
+                            }
+                        },
+                    )?,
                 )?;
             }
         }
     }
     Ok(http)
+}
+
+fn parse_http_options(options: Option<Value>) -> Result<HttpRequestOptions, LuaPluginError> {
+    let Some(options) = options else {
+        return Ok(HttpRequestOptions::default());
+    };
+    match options {
+        Value::Nil => Ok(HttpRequestOptions::default()),
+        Value::Table(table) => parse_http_options_table(table),
+        other => Err(LuaPluginError::HttpOptionsNotTable {
+            kind: value_kind(&other).to_string(),
+        }),
+    }
+}
+
+fn parse_http_options_table(table: Table) -> Result<HttpRequestOptions, LuaPluginError> {
+    let headers_value: Value = table.get("headers")?;
+    let version_value: Value = table.get("version")?;
+    let has_headers = !matches!(headers_value, Value::Nil);
+    let has_version = !matches!(version_value, Value::Nil);
+    if has_headers || has_version {
+        let mut options = HttpRequestOptions::default();
+        if has_headers {
+            match headers_value {
+                Value::Table(headers_table) => {
+                    options.headers = parse_header_table(headers_table)?;
+                }
+                Value::Nil => {}
+                other => {
+                    return Err(LuaPluginError::HttpOptionsHeadersNotTable {
+                        kind: value_kind(&other).to_string(),
+                    });
+                }
+            }
+        }
+        if has_version {
+            match version_value {
+                Value::String(value) => {
+                    let value = value
+                        .to_str()
+                        .map_err(|_| LuaPluginError::HttpVersionNotUtf8)?;
+                    options.version = Some(parse_http_version(value.as_ref())?);
+                }
+                Value::Nil => {}
+                other => {
+                    return Err(LuaPluginError::HttpVersionNotString {
+                        kind: value_kind(&other).to_string(),
+                    });
+                }
+            }
+        }
+        return Ok(options);
+    }
+    let headers = parse_header_table(table)?;
+    Ok(HttpRequestOptions {
+        headers,
+        version: None,
+    })
+}
+
+fn parse_http_version(value: &str) -> Result<Version, LuaPluginError> {
+    let normalized = value.trim().to_ascii_lowercase();
+    match normalized.as_str() {
+        "1" | "1.1" | "http1" | "http1.1" | "http/1.1" => Ok(Version::HTTP_11),
+        "2" | "h2" | "http2" | "http/2" => Ok(Version::HTTP_2),
+        _ => Err(LuaPluginError::HttpVersionUnsupported {
+            value: value.to_string(),
+        }),
+    }
 }
 
 fn parse_header_table(table: Table) -> Result<Vec<(String, String)>, LuaPluginError> {

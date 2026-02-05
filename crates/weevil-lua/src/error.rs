@@ -44,6 +44,16 @@ pub enum LuaPluginError {
     HttpHeaderInvalidName { name: String },
     #[error("HTTP header {name} has invalid value: {value}")]
     HttpHeaderInvalidValue { name: String, value: String },
+    #[error("HTTP options must be a table, got {kind}")]
+    HttpOptionsNotTable { kind: String },
+    #[error("HTTP options headers must be a table, got {kind}")]
+    HttpOptionsHeadersNotTable { kind: String },
+    #[error("HTTP version must be a string, got {kind}")]
+    HttpVersionNotString { kind: String },
+    #[error("HTTP version is not valid UTF-8")]
+    HttpVersionNotUtf8,
+    #[error("HTTP version {value} is not supported (use \"1.1\" or \"2\")")]
+    HttpVersionUnsupported { value: String },
     #[error("HTTP request failed for {url}: {source}")]
     HttpRequest {
         url: String,

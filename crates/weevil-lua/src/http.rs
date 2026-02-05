@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use reqwest::Client as AsyncClient;
+use reqwest::Version;
 use reqwest::blocking::Client as BlockingClient;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use url::Url;
@@ -158,6 +159,12 @@ pub struct HttpClient {
     async_client: AsyncClient,
 }
 
+#[derive(Debug, Default, Clone)]
+pub struct HttpRequestOptions {
+    pub(crate) headers: Vec<(String, String)>,
+    pub(crate) version: Option<Version>,
+}
+
 impl HttpClient {
     pub fn new(allowlist: Vec<TrustedUrl>) -> Result<Self, LuaPluginError> {
         let blocking = BlockingClient::builder()
@@ -187,13 +194,23 @@ impl HttpClient {
         self.allowlist.as_ref()
     }
 
-    pub fn get_blocking(&self, url: &str) -> Result<String, LuaPluginError> {
+    pub fn get_blocking(
+        &self,
+        url: &str,
+        options: &HttpRequestOptions,
+    ) -> Result<String, LuaPluginError> {
         let parsed = self.ensure_trusted(url)?;
-        let response = self.blocking.get(parsed.as_str()).send().map_err(|err| {
-            LuaPluginError::HttpRequest {
-                url: parsed.to_string(),
-                source: err,
-            }
+        let mut request = self.blocking.get(parsed.as_str());
+        if let Some(version) = options.version {
+            request = request.version(version);
+        }
+        if !options.headers.is_empty() {
+            let header_map = build_headers(&options.headers)?;
+            request = request.headers(header_map);
+        }
+        let response = request.send().map_err(|err| LuaPluginError::HttpRequest {
+            url: parsed.to_string(),
+            source: err,
         })?;
         let status = response.status();
         if !status.is_success() {
@@ -208,75 +225,22 @@ impl HttpClient {
         })
     }
 
-    pub fn get_blocking_with_headers(
+    #[cfg(feature = "async")]
+    pub async fn get_async(
         &self,
         url: &str,
-        headers: &[(String, String)],
+        options: &HttpRequestOptions,
     ) -> Result<String, LuaPluginError> {
         let parsed = self.ensure_trusted(url)?;
-        let header_map = build_headers(headers)?;
-        let response = self
-            .blocking
-            .get(parsed.as_str())
-            .headers(header_map)
-            .send()
-            .map_err(|err| LuaPluginError::HttpRequest {
-                url: parsed.to_string(),
-                source: err,
-            })?;
-        let status = response.status();
-        if !status.is_success() {
-            return Err(LuaPluginError::HttpStatus {
-                url: parsed.to_string(),
-                status: status.as_u16(),
-            });
+        let mut request = self.async_client.get(parsed.as_str());
+        if let Some(version) = options.version {
+            request = request.version(version);
         }
-        response.text().map_err(|err| LuaPluginError::HttpRequest {
-            url: parsed.to_string(),
-            source: err,
-        })
-    }
-
-    #[cfg(feature = "async")]
-    pub async fn get_async(&self, url: &str) -> Result<String, LuaPluginError> {
-        let parsed = self.ensure_trusted(url)?;
-        let response = self
-            .async_client
-            .get(parsed.as_str())
-            .send()
-            .await
-            .map_err(|err| LuaPluginError::HttpRequest {
-                url: parsed.to_string(),
-                source: err,
-            })?;
-        let status = response.status();
-        if !status.is_success() {
-            return Err(LuaPluginError::HttpStatus {
-                url: parsed.to_string(),
-                status: status.as_u16(),
-            });
+        if !options.headers.is_empty() {
+            let header_map = build_headers(&options.headers)?;
+            request = request.headers(header_map);
         }
-        response
-            .text()
-            .await
-            .map_err(|err| LuaPluginError::HttpRequest {
-                url: parsed.to_string(),
-                source: err,
-            })
-    }
-
-    #[cfg(feature = "async")]
-    pub async fn get_async_with_headers(
-        &self,
-        url: &str,
-        headers: &[(String, String)],
-    ) -> Result<String, LuaPluginError> {
-        let parsed = self.ensure_trusted(url)?;
-        let header_map = build_headers(headers)?;
-        let response = self
-            .async_client
-            .get(parsed.as_str())
-            .headers(header_map)
+        let response = request
             .send()
             .await
             .map_err(|err| LuaPluginError::HttpRequest {
