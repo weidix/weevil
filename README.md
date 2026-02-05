@@ -86,3 +86,8 @@ and a hint describing the supported subset.
   `parse_with_errors` to keep the parsed tree plus any issues.
 - CSS parsing returns `SelectorError` with line/column and an input snippet.
 - XPath parsing returns `XPathError` with the span and a snippet.
+
+## TODO
+
+- Expand beyond current HTTP requests by adding an emulated crawler built on `chromiumoxide`
+  in `weevil-lua`.
