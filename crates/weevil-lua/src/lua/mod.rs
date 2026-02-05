@@ -1,3 +1,5 @@
+#[cfg(feature = "json")]
+mod json;
 mod module;
 mod types;
 

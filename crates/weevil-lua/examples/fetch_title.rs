@@ -5,8 +5,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 return {
   trusted_urls = { "https://example.com/" },
   run = function()
-    local html = weevil.http.get("https://example.com/")
-    local tree = weevil.html.parse(html)
+    local page = weevil.http.get("https://example.com/")
+    local tree = weevil.html.parse(page)
     local node = weevil.selector.parse("h1"):select_one(tree)
     if not node then return nil end
     return tree:text(node)

@@ -5,6 +5,8 @@ use weevil_core::{HtmlTree, Selector, XPath};
 
 use crate::error::LuaPluginError;
 use crate::http::HttpClient;
+#[cfg(feature = "json")]
+use crate::lua::json::build_json_table;
 use crate::lua::types::{LuaHtmlTree, LuaSelector, LuaXPath};
 
 #[derive(Clone)]
@@ -19,6 +21,8 @@ pub fn install_module(lua: &Lua, http_mode: HttpMode) -> Result<(), LuaPluginErr
     weevil.set("selector", build_selector_table(lua)?)?;
     weevil.set("xpath", build_xpath_table(lua)?)?;
     weevil.set("http", build_http_table(lua, http_mode)?)?;
+    #[cfg(feature = "json")]
+    weevil.set("json", build_json_table(lua)?)?;
     lua.globals().set("weevil", weevil)?;
     Ok(())
 }

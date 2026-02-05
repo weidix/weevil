@@ -79,3 +79,96 @@ return {
     let result = plugin.call(()).expect("run plugin");
     assert!(result.is_none());
 }
+
+#[test]
+fn json_encode_decode_roundtrip() {
+    let script = r#"
+return {
+  trusted_urls = {},
+  run = function()
+    local input = {
+      name = "Neo",
+      active = true,
+      age = 33,
+      tags = { "a", "b" },
+      none = weevil.json.null,
+    }
+    local encoded = weevil.json.encode(input)
+    local decoded = weevil.json.decode(encoded)
+    return {
+      encoded = encoded,
+      name = decoded.name,
+      active = decoded.active,
+      age = decoded.age,
+      tag = decoded.tags[2],
+      is_null = (decoded.none == weevil.json.null),
+    }
+  end
+}
+"#;
+    let plugin = LuaPlugin::from_str(script).expect("load plugin");
+    let result = plugin.call(()).expect("run plugin").expect("missing value");
+    let table = match result {
+        mlua::Value::Table(table) => table,
+        _ => panic!("expected table"),
+    };
+    let encoded: String = table.get("encoded").expect("encoded");
+    let name: String = table.get("name").expect("name");
+    let active: bool = table.get("active").expect("active");
+    let age: i64 = table.get("age").expect("age");
+    let tag: String = table.get("tag").expect("tag");
+    let is_null: bool = table.get("is_null").expect("is_null");
+    assert!(!encoded.is_empty());
+    assert_eq!(name, "Neo");
+    assert!(active);
+    assert_eq!(age, 33);
+    assert_eq!(tag, "b");
+    assert!(is_null);
+}
+
+#[test]
+fn json_decode_preserves_null_in_arrays() {
+    let script = r#"
+return {
+  trusted_urls = {},
+  run = function()
+    local obj = weevil.json.decode('{"list":[1,2,null],"flag":false}')
+    return {
+      len = #obj.list,
+      second = obj.list[2],
+      null_ok = (obj.list[3] == weevil.json.null),
+      flag = obj.flag,
+    }
+  end
+}
+"#;
+    let plugin = LuaPlugin::from_str(script).expect("load plugin");
+    let result = plugin.call(()).expect("run plugin").expect("missing value");
+    let table = match result {
+        mlua::Value::Table(table) => table,
+        _ => panic!("expected table"),
+    };
+    let len: i64 = table.get("len").expect("len");
+    let second: i64 = table.get("second").expect("second");
+    let null_ok: bool = table.get("null_ok").expect("null_ok");
+    let flag: bool = table.get("flag").expect("flag");
+    assert_eq!(len, 3);
+    assert_eq!(second, 2);
+    assert!(null_ok);
+    assert!(!flag);
+}
+
+#[test]
+fn json_encode_rejects_functions() {
+    let script = r#"
+return {
+  trusted_urls = {},
+  run = function()
+    return weevil.json.encode(function() end)
+  end
+}
+"#;
+    let plugin = LuaPlugin::from_str(script).expect("load plugin");
+    let err = plugin.call(()).expect_err("should fail");
+    assert!(err.to_string().contains("unsupported Lua value function"));
+}
