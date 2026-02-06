@@ -27,6 +27,9 @@ pub(crate) enum AppError {
     InputNotFile {
         path: PathBuf,
     },
+    InputNotDir {
+        path: PathBuf,
+    },
     PathNotUtf8 {
         path: PathBuf,
     },
@@ -41,6 +44,14 @@ pub(crate) enum AppError {
         path: PathBuf,
     },
     SubtitleScan {
+        path: PathBuf,
+        source: std::io::Error,
+    },
+    DirRead {
+        path: PathBuf,
+        source: std::io::Error,
+    },
+    DirEntryType {
         path: PathBuf,
         source: std::io::Error,
     },
@@ -85,6 +96,9 @@ pub(crate) enum AppError {
     InputNameFormatEmpty {
         input: String,
         rules: Vec<String>,
+    },
+    MaxDepthInvalid {
+        depth: i32,
     },
 }
 
@@ -149,6 +163,9 @@ impl fmt::Display for AppError {
             AppError::InputNotFile { path } => {
                 write!(f, "input path {path:?} is not a file")
             }
+            AppError::InputNotDir { path } => {
+                write!(f, "input path {path:?} is not a directory")
+            }
             AppError::PathNotUtf8 { path } => {
                 write!(f, "path {path:?} is not valid UTF-8")
             }
@@ -163,6 +180,15 @@ impl fmt::Display for AppError {
             }
             AppError::SubtitleScan { path, source } => {
                 write!(f, "failed to scan subtitles in {path:?}: {source}")
+            }
+            AppError::DirRead { path, source } => {
+                write!(f, "failed to read directory {path:?}: {source}")
+            }
+            AppError::DirEntryType { path, source } => {
+                write!(
+                    f,
+                    "failed to read directory entry type for {path:?}: {source}"
+                )
             }
             AppError::FileLock { path, source } => {
                 write!(f, "failed to lock file {path:?}: {source}")
@@ -203,6 +229,12 @@ impl fmt::Display for AppError {
                 write!(
                     f,
                     "input filename {input:?} resolved to empty after applying remove rules {rules:?}"
+                )
+            }
+            AppError::MaxDepthInvalid { depth } => {
+                write!(
+                    f,
+                    "max depth {depth} is invalid; use -1 for unlimited or a non-negative value"
                 )
             }
         }

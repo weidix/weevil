@@ -115,6 +115,73 @@ fn parse_file_mode_folder_multi() {
 }
 
 #[test]
+fn parse_dir_mode() {
+    let cli = Cli::try_parse_from([
+        "weevil",
+        "dir",
+        "--input",
+        "videos",
+        "--script",
+        "script.lua",
+        "--output",
+        "output/{title}",
+        "--max-depth",
+        "2",
+    ])
+    .expect("expected command");
+
+    if let Command::Dir { max_depth, .. } = cli.command {
+        assert_eq!(max_depth, 2);
+    } else {
+        panic!("expected dir command");
+    }
+}
+
+#[test]
+fn parse_dir_mode_default_depth() {
+    let cli = Cli::try_parse_from([
+        "weevil",
+        "dir",
+        "--input",
+        "videos",
+        "--script",
+        "script.lua",
+        "--output",
+        "output/{title}",
+    ])
+    .expect("expected command");
+
+    if let Command::Dir { max_depth, .. } = cli.command {
+        assert_eq!(max_depth, -1);
+    } else {
+        panic!("expected dir command");
+    }
+}
+
+#[test]
+fn parse_dir_mode_negative_depth() {
+    let cli = Cli::try_parse_from([
+        "weevil",
+        "dir",
+        "--input",
+        "videos",
+        "--script",
+        "script.lua",
+        "--output",
+        "output/{title}",
+        "--max-depth",
+        "-1",
+    ])
+    .expect("expected command");
+
+    if let Command::Dir { max_depth, .. } = cli.command {
+        assert_eq!(max_depth, -1);
+    } else {
+        panic!("expected dir command");
+    }
+}
+
+#[test]
 fn parse_extra_args() {
     let error = Cli::try_parse_from([
         "weevil",

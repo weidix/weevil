@@ -7,6 +7,7 @@ use serde::Serialize;
 use weevil_lua::LuaPlugin;
 
 use crate::cli::{Cli, Command, FolderMultiStrategy};
+use crate::dir_mode;
 use crate::errors::AppError;
 use crate::file_mode;
 use crate::nfo;
@@ -32,7 +33,21 @@ pub(crate) fn run() -> Result<(), AppError> {
             &input_name_remove,
             map_folder_multi(folder_multi),
         ),
-        Command::Dir => Err(AppError::NotImplemented { mode: "dir" }),
+        Command::Dir {
+            input,
+            script,
+            output,
+            input_name_remove,
+            folder_multi,
+            max_depth,
+        } => dir_mode::run_dir_mode(
+            &input,
+            &script,
+            &output,
+            &input_name_remove,
+            map_folder_multi(folder_multi),
+            max_depth,
+        ),
         Command::Watch => Err(AppError::NotImplemented { mode: "watch" }),
     }
 }

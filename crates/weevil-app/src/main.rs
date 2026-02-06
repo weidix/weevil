@@ -1,5 +1,6 @@
 mod app;
 mod cli;
+mod dir_mode;
 mod errors;
 mod file_mode;
 mod logging;
