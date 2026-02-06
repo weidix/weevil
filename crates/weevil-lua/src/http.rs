@@ -225,6 +225,38 @@ impl HttpClient {
         })
     }
 
+    pub fn post_blocking(
+        &self,
+        url: &str,
+        body: &str,
+        options: &HttpRequestOptions,
+    ) -> Result<String, LuaPluginError> {
+        let parsed = self.ensure_trusted(url)?;
+        let mut request = self.blocking.post(parsed.as_str()).body(body.to_string());
+        if let Some(version) = options.version {
+            request = request.version(version);
+        }
+        if !options.headers.is_empty() {
+            let header_map = build_headers(&options.headers)?;
+            request = request.headers(header_map);
+        }
+        let response = request.send().map_err(|err| LuaPluginError::HttpRequest {
+            url: parsed.to_string(),
+            source: err,
+        })?;
+        let status = response.status();
+        if !status.is_success() {
+            return Err(LuaPluginError::HttpStatus {
+                url: parsed.to_string(),
+                status: status.as_u16(),
+            });
+        }
+        response.text().map_err(|err| LuaPluginError::HttpRequest {
+            url: parsed.to_string(),
+            source: err,
+        })
+    }
+
     #[cfg(feature = "async")]
     pub async fn get_async(
         &self,
@@ -233,6 +265,48 @@ impl HttpClient {
     ) -> Result<String, LuaPluginError> {
         let parsed = self.ensure_trusted(url)?;
         let mut request = self.async_client.get(parsed.as_str());
+        if let Some(version) = options.version {
+            request = request.version(version);
+        }
+        if !options.headers.is_empty() {
+            let header_map = build_headers(&options.headers)?;
+            request = request.headers(header_map);
+        }
+        let response = request
+            .send()
+            .await
+            .map_err(|err| LuaPluginError::HttpRequest {
+                url: parsed.to_string(),
+                source: err,
+            })?;
+        let status = response.status();
+        if !status.is_success() {
+            return Err(LuaPluginError::HttpStatus {
+                url: parsed.to_string(),
+                status: status.as_u16(),
+            });
+        }
+        response
+            .text()
+            .await
+            .map_err(|err| LuaPluginError::HttpRequest {
+                url: parsed.to_string(),
+                source: err,
+            })
+    }
+
+    #[cfg(feature = "async")]
+    pub async fn post_async(
+        &self,
+        url: &str,
+        body: &str,
+        options: &HttpRequestOptions,
+    ) -> Result<String, LuaPluginError> {
+        let parsed = self.ensure_trusted(url)?;
+        let mut request = self
+            .async_client
+            .post(parsed.as_str())
+            .body(body.to_string());
         if let Some(version) = options.version {
             request = request.version(version);
         }

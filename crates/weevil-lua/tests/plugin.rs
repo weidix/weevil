@@ -179,12 +179,45 @@ return {
 }
 
 #[test]
+fn http_post_blocks_untrusted_urls() {
+    let script = r#"
+return {
+  trusted_urls = { "https://allowed.example/" },
+  run = function()
+    return weevil.http.post("https://blocked.example/", "{}")
+  end
+}
+"#;
+    let plugin = LuaPlugin::from_str(&script).expect("load plugin");
+    let err = plugin.call(()).expect_err("should fail");
+    assert!(err.to_string().contains("trusted list"));
+}
+
+#[test]
 fn http_rejects_non_string_header_name() {
     let script = r#"
 return {
   trusted_urls = { "https://example.com/" },
   run = function()
     return weevil.http.get("https://example.com/", { headers = { [1] = "value" } })
+  end
+}
+"#;
+    let plugin = LuaPlugin::from_str(&script).expect("load plugin");
+    let err = plugin.call(()).expect_err("should fail");
+    assert!(
+        err.to_string()
+            .contains("HTTP header name must be a string")
+    );
+}
+
+#[test]
+fn http_post_rejects_non_string_header_name() {
+    let script = r#"
+return {
+  trusted_urls = { "https://example.com/" },
+  run = function()
+    return weevil.http.post("https://example.com/", "{}", { headers = { [1] = "value" } })
   end
 }
 "#;
@@ -221,6 +254,21 @@ return {
   trusted_urls = { "https://example.com/" },
   run = function()
     return weevil.http.get("https://example.com/", { version = 2 })
+  end
+}
+"#;
+    let plugin = LuaPlugin::from_str(&script).expect("load plugin");
+    let err = plugin.call(()).expect_err("should fail");
+    assert!(err.to_string().contains("HTTP version must be a string"));
+}
+
+#[test]
+fn http_post_rejects_non_string_version() {
+    let script = r#"
+return {
+  trusted_urls = { "https://example.com/" },
+  run = function()
+    return weevil.http.post("https://example.com/", "{}", { version = 2 })
   end
 }
 "#;
