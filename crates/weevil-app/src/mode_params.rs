@@ -11,7 +11,7 @@ pub(crate) enum MultiFolderStrategy {
 pub(crate) struct FileModeParams {
     script: PathBuf,
     output_template: String,
-    input_name_remove: Vec<String>,
+    input_name_rules: Vec<String>,
     folder_multi: MultiFolderStrategy,
 }
 
@@ -19,13 +19,13 @@ impl FileModeParams {
     pub(crate) fn new(
         script: PathBuf,
         output_template: String,
-        input_name_remove: Vec<String>,
+        input_name_rules: Vec<String>,
         folder_multi: MultiFolderStrategy,
     ) -> Self {
         Self {
             script,
             output_template,
-            input_name_remove,
+            input_name_rules,
             folder_multi,
         }
     }
@@ -38,8 +38,8 @@ impl FileModeParams {
         &self.output_template
     }
 
-    pub(crate) fn input_name_remove(&self) -> &[String] {
-        &self.input_name_remove
+    pub(crate) fn input_name_rules(&self) -> &[String] {
+        &self.input_name_rules
     }
 
     pub(crate) fn folder_multi(&self) -> MultiFolderStrategy {

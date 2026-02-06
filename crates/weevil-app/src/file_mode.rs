@@ -9,17 +9,19 @@ use std::fs::File;
 use std::path::{Path, PathBuf};
 use weevil_lua::LuaPlugin;
 
+mod input_name;
 mod naming;
 mod subtitle_match;
 
-use naming::{build_file_name, format_input_name, format_output_paths};
+use input_name::format_input_name;
+use naming::{build_file_name, format_output_paths};
 pub(crate) use subtitle_match::subtitle_suffix;
 
 const SUBTITLE_EXTENSIONS: &[&str] = &["srt", "ass", "ssa", "vtt", "sub", "idx", "sup"];
 pub(crate) fn run_file_mode(input: &Path, params: &FileModeParams) -> Result<(), AppError> {
     ensure_input_file(input)?;
     let input_stem = file_stem_string(input)?;
-    let input_name = format_input_name(&input_stem, params.input_name_remove())?;
+    let input_name = format_input_name(&input_stem, params.input_name_rules())?;
     let input_path = path_to_string(input)?;
 
     let task = TaskContext::new("file");

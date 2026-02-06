@@ -26,13 +26,13 @@ pub(crate) fn run() -> Result<(), AppError> {
             input,
             script,
             output,
-            input_name_remove,
+            input_name_rules,
             folder_multi,
         } => {
             let params = FileModeParams::new(
                 script,
                 output,
-                input_name_remove,
+                input_name_rules,
                 map_folder_multi(folder_multi),
             );
             file_mode::run_file_mode(&input, &params)
@@ -41,14 +41,14 @@ pub(crate) fn run() -> Result<(), AppError> {
             input,
             script,
             output,
-            input_name_remove,
+            input_name_rules,
             folder_multi,
             max_depth,
         } => {
             let params = FileModeParams::new(
                 script,
                 output,
-                input_name_remove,
+                input_name_rules,
                 map_folder_multi(folder_multi),
             );
             dir_mode::run_dir_mode(&input, &params, max_depth)
@@ -57,14 +57,14 @@ pub(crate) fn run() -> Result<(), AppError> {
             input,
             script,
             output,
-            input_name_remove,
+            input_name_rules,
             folder_multi,
             max_depth,
         } => {
             let params = FileModeParams::new(
                 script,
                 output,
-                input_name_remove,
+                input_name_rules,
                 map_folder_multi(folder_multi),
             );
             watch_mode::run_watch_mode(&input, &params, max_depth)

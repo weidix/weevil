@@ -8,6 +8,9 @@ use crate::nfo::{Actor, Movie};
 
 use actor::{parse_actor_field, render_actor_field};
 
+#[cfg(test)]
+pub(crate) use super::input_name::format_input_name;
+
 struct TemplateRender {
     rendered: String,
 }
@@ -161,30 +164,6 @@ fn collect_template_fields(template: &str) -> Result<Vec<String>, AppError> {
         }
     }
     Ok(fields)
-}
-
-pub(crate) fn format_input_name(input: &str, remove: &[String]) -> Result<String, AppError> {
-    if remove.is_empty() {
-        return Ok(input.to_string());
-    }
-
-    let mut current = input.to_string();
-    for token in remove {
-        let trimmed = token.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        current = current.replace(trimmed, "");
-    }
-
-    let cleaned = collapse_whitespace(&current);
-    if cleaned.is_empty() {
-        return Err(AppError::InputNameFormatEmpty {
-            input: input.to_string(),
-            rules: remove.to_vec(),
-        });
-    }
-    Ok(cleaned)
 }
 
 pub(crate) fn render_template(template: &str, movie: &Movie) -> Result<String, AppError> {
@@ -405,23 +384,6 @@ fn sanitize_component(value: &str) -> String {
         last_space = false;
     }
     out.trim().trim_matches('.').to_string()
-}
-
-fn collapse_whitespace(value: &str) -> String {
-    let mut out = String::new();
-    let mut last_space = false;
-    for ch in value.chars() {
-        if ch.is_whitespace() {
-            if !last_space {
-                out.push(' ');
-                last_space = true;
-            }
-            continue;
-        }
-        out.push(ch);
-        last_space = false;
-    }
-    out.trim().to_string()
 }
 
 #[cfg(test)]

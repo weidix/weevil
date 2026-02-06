@@ -66,8 +66,65 @@ fn parse_file_mode() {
 }
 
 #[test]
-fn parse_file_mode_input_name_remove() {
+fn parse_file_mode_input_name_rule() {
     let cli = Cli::try_parse_from([
+        "weevil",
+        "file",
+        "--input",
+        "movie.mkv",
+        "--script",
+        "script.lua",
+        "--output",
+        "output/{title}",
+        "--input-name-rule",
+        "1080p,WEB-DL",
+    ])
+    .expect("expected command");
+
+    if let Command::File {
+        input_name_rules, ..
+    } = cli.command
+    {
+        assert_eq!(input_name_rules, vec!["1080p,WEB-DL"]);
+    } else {
+        panic!("expected file command");
+    }
+}
+
+#[test]
+fn parse_file_mode_input_name_rule_repeated() {
+    let cli = Cli::try_parse_from([
+        "weevil",
+        "file",
+        "--input",
+        "movie.mkv",
+        "--script",
+        "script.lua",
+        "--output",
+        "output/{title}",
+        "--input-name-rule",
+        "regex:\\[[^\\]]+\\]",
+        "--input-name-rule",
+        "replace:_=> ",
+    ])
+    .expect("expected command");
+
+    if let Command::File {
+        input_name_rules, ..
+    } = cli.command
+    {
+        assert_eq!(
+            input_name_rules,
+            vec!["regex:\\[[^\\]]+\\]", "replace:_=> "]
+        );
+    } else {
+        panic!("expected file command");
+    }
+}
+
+#[test]
+fn parse_file_mode_legacy_input_name_option_rejected() {
+    let error = Cli::try_parse_from([
         "weevil",
         "file",
         "--input",
@@ -79,16 +136,8 @@ fn parse_file_mode_input_name_remove() {
         "--input-name-remove",
         "1080p,WEB-DL",
     ])
-    .expect("expected command");
-
-    if let Command::File {
-        input_name_remove, ..
-    } = cli.command
-    {
-        assert_eq!(input_name_remove, vec!["1080p", "WEB-DL"]);
-    } else {
-        panic!("expected file command");
-    }
+    .expect_err("expected error");
+    assert_eq!(error.kind(), clap::error::ErrorKind::UnknownArgument);
 }
 
 #[test]
@@ -230,7 +279,7 @@ fn parse_watch_mode_with_explicit_values() {
         "script.lua",
         "--output",
         "output/{title}",
-        "--input-name-remove",
+        "--input-name-rule",
         "1080p,WEB-DL",
         "--folder-multi",
         "soft-link",
@@ -243,7 +292,7 @@ fn parse_watch_mode_with_explicit_values() {
         input,
         script,
         output,
-        input_name_remove,
+        input_name_rules,
         folder_multi,
         max_depth,
     } = cli.command
@@ -251,7 +300,7 @@ fn parse_watch_mode_with_explicit_values() {
         assert_eq!(input, PathBuf::from("videos"));
         assert_eq!(script, PathBuf::from("script.lua"));
         assert_eq!(output, "output/{title}");
-        assert_eq!(input_name_remove, vec!["1080p", "WEB-DL"]);
+        assert_eq!(input_name_rules, vec!["1080p,WEB-DL"]);
         assert_eq!(folder_multi, FolderMultiStrategy::SoftLink);
         assert_eq!(max_depth, 1);
     } else {

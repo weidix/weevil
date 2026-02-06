@@ -10,6 +10,7 @@ mlua = { version = "0.11", features = ["lua55", "vendored", "serde"] }
 notify = "6"
 quick-xml = { version = "0.37", features = ["serialize"] }
 serde = { version = "1", features = ["derive"] }
+regex = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 weevil-lua = { path = "../weevil-lua" }

@@ -53,12 +53,11 @@ pub(crate) enum Command {
         )]
         output: String,
         #[arg(
-            long,
-            value_name = "REMOVE",
-            value_delimiter = ',',
-            help = "Comma-separated tokens to remove from the input filename before passing to Lua."
+            long = "input-name-rule",
+            value_name = "RULE",
+            help = "Input-name cleanup rule; can be repeated. Supports legacy tokens (including comma-separated list) and prefixed rules: literal:<text>, regex:<pattern>, replace:<from>=><to>, regex-replace:<pattern>=><to>."
         )]
-        input_name_remove: Vec<String>,
+        input_name_rules: Vec<String>,
         #[arg(
             long,
             value_enum,
@@ -85,12 +84,11 @@ pub(crate) enum Command {
         )]
         output: String,
         #[arg(
-            long,
-            value_name = "REMOVE",
-            value_delimiter = ',',
-            help = "Comma-separated tokens to remove from the input filename before passing to Lua."
+            long = "input-name-rule",
+            value_name = "RULE",
+            help = "Input-name cleanup rule; can be repeated. Supports legacy tokens (including comma-separated list) and prefixed rules: literal:<text>, regex:<pattern>, replace:<from>=><to>, regex-replace:<pattern>=><to>."
         )]
-        input_name_remove: Vec<String>,
+        input_name_rules: Vec<String>,
         #[arg(
             long,
             value_enum,
@@ -125,12 +123,11 @@ pub(crate) enum Command {
         )]
         output: String,
         #[arg(
-            long,
-            value_name = "REMOVE",
-            value_delimiter = ',',
-            help = "Comma-separated tokens to remove from the input filename before passing to Lua."
+            long = "input-name-rule",
+            value_name = "RULE",
+            help = "Input-name cleanup rule; can be repeated. Supports legacy tokens (including comma-separated list) and prefixed rules: literal:<text>, regex:<pattern>, replace:<from>=><to>, regex-replace:<pattern>=><to>."
         )]
-        input_name_remove: Vec<String>,
+        input_name_rules: Vec<String>,
         #[arg(
             long,
             value_enum,

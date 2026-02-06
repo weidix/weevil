@@ -66,7 +66,17 @@ return {
 - `name`: `run(name)`
 - `file` / `dir` / `watch`: `run(input_name, input_path)`
 
-`input_name` is the file stem after applying `--input-name-remove` rules.
+`input_name` is the file stem after applying `--input-name-rule` rules.
+
+`--input-name-rule` supports both legacy and rule-based syntax:
+
+- Legacy rule token: `1080p` (or `1080p,WEB-DL` in one argument).
+- Literal remove: `literal:UNCUT`.
+- Regex remove: `regex:\\[[^\\]]+\\]`.
+- Literal replace: `replace:_=> `.
+- Regex replace: `regex-replace:\\s+=> `.
+
+Rules are applied in order and can be repeated with multiple `--input-name-rule` flags.
 
 ### `run` return value
 
@@ -98,7 +108,9 @@ cargo run -p weevil-app -- file \
   --input ./videos/sample-video.mp4 \
   --script demo_lua/source_alpha/lua/source_alpha.lua \
   --output "./library/{title}" \
-  --input-name-remove "1080p,WEB-DL" \
+  --input-name-rule "1080p,WEB-DL" \
+  --input-name-rule "regex:\\[[^\\]]+\\]" \
+  --input-name-rule "replace:_=> " \
   --folder-multi first
 ```
 

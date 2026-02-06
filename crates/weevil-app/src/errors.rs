@@ -90,9 +90,13 @@ pub(crate) enum AppError {
     TemplateEmptySegment {
         template: String,
     },
-    InputNameFormatEmpty {
+    InputNameRuleResultEmpty {
         input: String,
         rules: Vec<String>,
+    },
+    InputNameRuleInvalid {
+        rule: String,
+        reason: String,
     },
     MaxDepthInvalid {
         depth: i32,
@@ -219,11 +223,14 @@ impl fmt::Display for AppError {
             AppError::TemplateEmptySegment { template } => {
                 write!(f, "template {template:?} resolved to an empty path segment")
             }
-            AppError::InputNameFormatEmpty { input, rules } => {
+            AppError::InputNameRuleResultEmpty { input, rules } => {
                 write!(
                     f,
-                    "input filename {input:?} resolved to empty after applying remove rules {rules:?}"
+                    "input filename {input:?} resolved to empty after applying input-name rules {rules:?}"
                 )
+            }
+            AppError::InputNameRuleInvalid { rule, reason } => {
+                write!(f, "invalid input-name-rule {rule:?}: {reason}")
             }
             AppError::MaxDepthInvalid { depth } => {
                 write!(
