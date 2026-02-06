@@ -197,3 +197,64 @@ fn parse_extra_args() {
     .expect_err("expected error");
     assert_eq!(error.kind(), clap::error::ErrorKind::UnknownArgument);
 }
+
+#[test]
+fn parse_watch_mode_with_defaults() {
+    let cli = Cli::try_parse_from([
+        "weevil",
+        "watch",
+        "--input",
+        "videos",
+        "--script",
+        "script.lua",
+        "--output",
+        "output/{title}",
+    ])
+    .expect("expected command");
+
+    if let Command::Watch { max_depth, .. } = cli.command {
+        assert_eq!(max_depth, -1);
+    } else {
+        panic!("expected watch command");
+    }
+}
+
+#[test]
+fn parse_watch_mode_with_explicit_values() {
+    let cli = Cli::try_parse_from([
+        "weevil",
+        "watch",
+        "--input",
+        "videos",
+        "--script",
+        "script.lua",
+        "--output",
+        "output/{title}",
+        "--input-name-remove",
+        "1080p,WEB-DL",
+        "--folder-multi",
+        "soft-link",
+        "--max-depth",
+        "1",
+    ])
+    .expect("expected command");
+
+    if let Command::Watch {
+        input,
+        script,
+        output,
+        input_name_remove,
+        folder_multi,
+        max_depth,
+    } = cli.command
+    {
+        assert_eq!(input, PathBuf::from("videos"));
+        assert_eq!(script, PathBuf::from("script.lua"));
+        assert_eq!(output, "output/{title}");
+        assert_eq!(input_name_remove, vec!["1080p", "WEB-DL"]);
+        assert_eq!(folder_multi, FolderMultiStrategy::SoftLink);
+        assert_eq!(max_depth, 1);
+    } else {
+        panic!("expected watch command");
+    }
+}

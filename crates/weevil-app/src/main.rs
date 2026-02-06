@@ -4,7 +4,9 @@ mod dir_mode;
 mod errors;
 mod file_mode;
 mod logging;
+mod mode_params;
 mod nfo;
+mod watch_mode;
 
 fn main() {
     logging::init_tracing();

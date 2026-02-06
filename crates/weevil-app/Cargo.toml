@@ -7,6 +7,7 @@ edition.workspace = true
 clap = { version = "4", features = ["derive"] }
 fs2 = "0.4"
 mlua = { version = "0.11", features = ["lua55", "vendored", "serde"] }
+notify = "6"
 quick-xml = { version = "0.37", features = ["serialize"] }
 serde = { version = "1", features = ["derive"] }
 tracing = "0.1"

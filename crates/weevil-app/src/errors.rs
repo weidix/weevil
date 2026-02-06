@@ -17,9 +17,6 @@ pub(crate) enum AppError {
     ScriptOutputInvalidUtf8,
     SerializeNfo(quick_xml::se::SeError),
     NfoParse(quick_xml::DeError),
-    NotImplemented {
-        mode: &'static str,
-    },
     InputMetadata {
         path: PathBuf,
         source: std::io::Error,
@@ -154,9 +151,6 @@ impl fmt::Display for AppError {
                 write!(f, "failed to serialize NFO XML: {error}")
             }
             AppError::NfoParse(error) => write!(f, "failed to parse NFO XML: {error}"),
-            AppError::NotImplemented { mode } => {
-                write!(f, "mode {mode} is reserved but not implemented yet")
-            }
             AppError::InputMetadata { path, source } => {
                 write!(f, "failed to read input metadata for {path:?}: {source}")
             }

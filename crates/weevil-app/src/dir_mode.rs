@@ -3,7 +3,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::errors::AppError;
-use crate::file_mode::{self, MultiFolderStrategy};
+use crate::file_mode;
+use crate::mode_params::FileModeParams;
 
 const VIDEO_EXTENSIONS: &[&str] = &[
     "mkv", "mp4", "avi", "mov", "m4v", "wmv", "flv", "webm", "ts", "m2ts", "mts", "mpg", "mpeg",
@@ -11,26 +12,21 @@ const VIDEO_EXTENSIONS: &[&str] = &[
 
 pub(crate) fn run_dir_mode(
     input: &Path,
-    script: &Path,
-    output_template: &str,
-    input_name_remove: &[String],
-    folder_multi: MultiFolderStrategy,
+    params: &FileModeParams,
     max_depth: i32,
 ) -> Result<(), AppError> {
-    ensure_input_dir(input)?;
-    let depth_limit = normalize_max_depth(max_depth)?;
-    let mut files = collect_video_files(input, depth_limit)?;
+    let mut files = scan_video_files(input, max_depth)?;
     files.sort();
     for file in files {
-        file_mode::run_file_mode(
-            &file,
-            script,
-            output_template,
-            input_name_remove,
-            folder_multi,
-        )?;
+        file_mode::run_file_mode(&file, params)?;
     }
     Ok(())
+}
+
+pub(crate) fn scan_video_files(input: &Path, max_depth: i32) -> Result<Vec<PathBuf>, AppError> {
+    ensure_input_dir(input)?;
+    let depth_limit = normalize_max_depth(max_depth)?;
+    collect_video_files(input, depth_limit)
 }
 
 fn ensure_input_dir(input: &Path) -> Result<(), AppError> {
@@ -100,7 +96,7 @@ fn should_descend(depth: usize, max_depth: Option<usize>) -> bool {
     }
 }
 
-fn is_video_path(path: &Path) -> bool {
+pub(crate) fn is_video_path(path: &Path) -> bool {
     let extension = match path.extension().and_then(|value| value.to_str()) {
         Some(value) => value,
         None => return false,

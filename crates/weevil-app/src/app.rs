@@ -10,7 +10,9 @@ use crate::cli::{Cli, Command, FolderMultiStrategy};
 use crate::dir_mode;
 use crate::errors::AppError;
 use crate::file_mode;
+use crate::mode_params::{FileModeParams, MultiFolderStrategy};
 use crate::nfo;
+use crate::watch_mode;
 
 pub(crate) fn run() -> Result<(), AppError> {
     let cli = Cli::try_parse().map_err(AppError::Cli)?;
@@ -26,13 +28,15 @@ pub(crate) fn run() -> Result<(), AppError> {
             output,
             input_name_remove,
             folder_multi,
-        } => file_mode::run_file_mode(
-            &input,
-            &script,
-            &output,
-            &input_name_remove,
-            map_folder_multi(folder_multi),
-        ),
+        } => {
+            let params = FileModeParams::new(
+                script,
+                output,
+                input_name_remove,
+                map_folder_multi(folder_multi),
+            );
+            file_mode::run_file_mode(&input, &params)
+        }
         Command::Dir {
             input,
             script,
@@ -40,23 +44,39 @@ pub(crate) fn run() -> Result<(), AppError> {
             input_name_remove,
             folder_multi,
             max_depth,
-        } => dir_mode::run_dir_mode(
-            &input,
-            &script,
-            &output,
-            &input_name_remove,
-            map_folder_multi(folder_multi),
+        } => {
+            let params = FileModeParams::new(
+                script,
+                output,
+                input_name_remove,
+                map_folder_multi(folder_multi),
+            );
+            dir_mode::run_dir_mode(&input, &params, max_depth)
+        }
+        Command::Watch {
+            input,
+            script,
+            output,
+            input_name_remove,
+            folder_multi,
             max_depth,
-        ),
-        Command::Watch => Err(AppError::NotImplemented { mode: "watch" }),
+        } => {
+            let params = FileModeParams::new(
+                script,
+                output,
+                input_name_remove,
+                map_folder_multi(folder_multi),
+            );
+            watch_mode::run_watch_mode(&input, &params, max_depth)
+        }
     }
 }
 
-fn map_folder_multi(strategy: FolderMultiStrategy) -> file_mode::MultiFolderStrategy {
+fn map_folder_multi(strategy: FolderMultiStrategy) -> MultiFolderStrategy {
     match strategy {
-        FolderMultiStrategy::HardLink => file_mode::MultiFolderStrategy::HardLink,
-        FolderMultiStrategy::SoftLink => file_mode::MultiFolderStrategy::SoftLink,
-        FolderMultiStrategy::First => file_mode::MultiFolderStrategy::First,
+        FolderMultiStrategy::HardLink => MultiFolderStrategy::HardLink,
+        FolderMultiStrategy::SoftLink => MultiFolderStrategy::SoftLink,
+        FolderMultiStrategy::First => MultiFolderStrategy::First,
     }
 }
 

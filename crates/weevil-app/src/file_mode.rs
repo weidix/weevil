@@ -1,5 +1,6 @@
 use crate::app::{TaskContext, render_nfo_output};
 use crate::errors::{AppError, LinkKind};
+use crate::mode_params::{FileModeParams, MultiFolderStrategy};
 use crate::nfo::Movie;
 use fs2::FileExt;
 use quick_xml::de::from_str;
@@ -15,20 +16,14 @@ use naming::{build_file_name, format_input_name, format_output_paths};
 pub(crate) use subtitle_match::subtitle_suffix;
 
 const SUBTITLE_EXTENSIONS: &[&str] = &["srt", "ass", "ssa", "vtt", "sub", "idx", "sup"];
-pub(crate) fn run_file_mode(
-    input: &Path,
-    script: &Path,
-    output_template: &str,
-    input_name_remove: &[String],
-    folder_multi: MultiFolderStrategy,
-) -> Result<(), AppError> {
+pub(crate) fn run_file_mode(input: &Path, params: &FileModeParams) -> Result<(), AppError> {
     ensure_input_file(input)?;
     let input_stem = file_stem_string(input)?;
-    let input_name = format_input_name(&input_stem, input_name_remove)?;
+    let input_name = format_input_name(&input_stem, params.input_name_remove())?;
     let input_path = path_to_string(input)?;
 
     let task = TaskContext::new("file");
-    let plugin = LuaPlugin::from_file(script).map_err(AppError::LuaPlugin)?;
+    let plugin = LuaPlugin::from_file(params.script()).map_err(AppError::LuaPlugin)?;
     plugin.set_log_context(task.id.clone(), task.kind);
     let value = plugin
         .call((input_name.as_str(), input_path.as_str()))
@@ -36,8 +31,12 @@ pub(crate) fn run_file_mode(
     let xml = render_nfo_output(value, plugin.lua())?;
     let movie: Movie = from_str(&xml).map_err(AppError::NfoParse)?;
 
-    let output_paths = format_output_paths(output_template, &movie, &input_stem)?;
-    let selected = select_output_paths(output_paths, output_template, folder_multi)?;
+    let output_paths = format_output_paths(params.output_template(), &movie, &input_stem)?;
+    let selected = select_output_paths(
+        output_paths,
+        params.output_template(),
+        params.folder_multi(),
+    )?;
     let primary_output = selected.primary;
     let extra_outputs = selected.extras;
 
@@ -88,22 +87,15 @@ pub(crate) fn run_file_mode(
     })?;
 
     if matches!(
-        folder_multi,
+        params.folder_multi(),
         MultiFolderStrategy::HardLink | MultiFolderStrategy::SoftLink
     ) {
         for targets in &extra_targets {
-            create_links(folder_multi, &primary_targets, targets)?;
+            create_links(params.folder_multi(), &primary_targets, targets)?;
         }
     }
 
     Ok(())
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum MultiFolderStrategy {
-    HardLink,
-    SoftLink,
-    First,
 }
 
 struct OutputTargets {
