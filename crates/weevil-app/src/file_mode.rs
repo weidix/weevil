@@ -9,8 +9,10 @@ use std::path::{Path, PathBuf};
 use weevil_lua::LuaPlugin;
 
 mod naming;
+mod subtitle_match;
 
 use naming::{build_file_name, format_input_name, format_output_paths};
+pub(crate) use subtitle_match::subtitle_suffix;
 
 const SUBTITLE_EXTENSIONS: &[&str] = &["srt", "ass", "ssa", "vtt", "sub", "idx", "sup"];
 pub(crate) fn run_file_mode(
@@ -250,16 +252,6 @@ fn is_subtitle_path(path: &Path) -> bool {
     SUBTITLE_EXTENSIONS
         .iter()
         .any(|candidate| *candidate == extension)
-}
-
-fn subtitle_suffix(video_stem: &str, subtitle_stem: &str) -> Option<String> {
-    if subtitle_stem == video_stem {
-        return Some(String::new());
-    }
-    subtitle_stem
-        .strip_prefix(video_stem)
-        .and_then(|rest| rest.strip_prefix('.'))
-        .map(|rest| format!(".{rest}"))
 }
 
 fn build_subtitle_move(

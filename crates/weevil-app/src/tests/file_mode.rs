@@ -4,10 +4,81 @@ use super::*;
 fn subtitle_suffix_matches_language_suffix() {
     assert_eq!(
         subtitle_suffix("Movie", "Movie.zh"),
-        Some(".zh".to_string())
+        Some(".zh-CN".to_string())
     );
     assert_eq!(subtitle_suffix("Movie", "Movie"), Some(String::new()));
     assert_eq!(subtitle_suffix("Movie", "Other"), None);
+}
+
+#[test]
+fn subtitle_suffix_matches_normalized_names() {
+    assert_eq!(
+        subtitle_suffix("My-Movie", "my movie.ZH"),
+        Some(".zh-CN".to_string())
+    );
+}
+
+#[test]
+fn subtitle_suffix_allows_short_name_matching() {
+    assert_eq!(
+        subtitle_suffix("Movie.2020.1080p", "Movie.zh"),
+        Some(".zh-CN".to_string())
+    );
+    assert_eq!(
+        subtitle_suffix("Movie.Special.Edition", "Movie"),
+        Some(String::new())
+    );
+}
+
+#[test]
+fn subtitle_suffix_ignores_noise_tokens() {
+    assert_eq!(
+        subtitle_suffix("Movie.2020.1080p.BluRay.x264", "Movie.zh"),
+        Some(".zh-CN".to_string())
+    );
+}
+
+#[test]
+fn subtitle_suffix_rejects_too_short_short_name() {
+    assert_eq!(subtitle_suffix("Up.2009", "U"), None);
+}
+
+#[test]
+fn subtitle_suffix_rejects_unrelated_names() {
+    assert_eq!(subtitle_suffix("Movie.One", "Movie.Two.zh"), None);
+    assert_eq!(subtitle_suffix("The.Room", "The.Roommate"), None);
+}
+
+#[test]
+fn subtitle_suffix_normalizes_language_aliases() {
+    assert_eq!(
+        subtitle_suffix("Movie", "Movie.zh_CN"),
+        Some(".zh-CN".to_string())
+    );
+    assert_eq!(
+        subtitle_suffix("Movie", "Movie.ch"),
+        Some(".zh-CN".to_string())
+    );
+    assert_eq!(
+        subtitle_suffix("Movie", "Movie.zh-TW"),
+        Some(".zh-TW".to_string())
+    );
+    assert_eq!(
+        subtitle_suffix("Movie", "Movie.en_US"),
+        Some(".en-US".to_string())
+    );
+    assert_eq!(
+        subtitle_suffix("Movie", "Movie.pt_br"),
+        Some(".pt-BR".to_string())
+    );
+}
+
+#[test]
+fn subtitle_suffix_keeps_language_and_other_suffix_parts() {
+    assert_eq!(
+        subtitle_suffix("Movie", "Movie.zh_CN.forced"),
+        Some(".zh-CN.forced".to_string())
+    );
 }
 
 #[test]
