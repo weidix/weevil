@@ -1,4 +1,6 @@
-use super::*;
+use mlua::Value;
+
+use crate::source_runner;
 
 #[test]
 fn render_nfo_from_table() {
@@ -7,7 +9,7 @@ fn render_nfo_from_table() {
         .load(r#"{ title = "Spirited Away", actor = { { name = "Chihiro", gender = "female" } } }"#)
         .eval()
         .expect("expected value");
-    let xml = render_nfo_output(Some(value), &lua).expect("expected xml");
+    let xml = source_runner::render_nfo_output(Some(value), &lua).expect("expected xml");
     assert!(xml.contains("<movie>"));
     assert!(xml.contains("<title>Spirited Away</title>"));
     assert!(xml.contains("<gender>female</gender>"));
@@ -19,6 +21,7 @@ fn render_nfo_from_table() {
 fn render_nfo_from_string() {
     let lua = mlua::Lua::new();
     let text = lua.create_string("<movie />").expect("expected lua string");
-    let xml = render_nfo_output(Some(Value::String(text)), &lua).expect("expected xml");
+    let xml =
+        source_runner::render_nfo_output(Some(Value::String(text)), &lua).expect("expected xml");
     assert_eq!(xml, "<movie />");
 }

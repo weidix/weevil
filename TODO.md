@@ -9,7 +9,7 @@
 - [x] Support config-file option policy: keep invocation-unique args in CLI (e.g., `name --name`, `file --input` for file path), and persist reusable defaults in config (e.g., `dir/watch --input` for directory, plus shared `--script` / `--output` / `--input-name-rule` / `--folder-multi` / `--max-depth`).
 - [x] Support saving images to local storage.
 - [x] Support multi-threaded fetching.
-- [ ] Support multi-source data aggregation.
+- [x] Support multi-source data aggregation.
 - [ ] Support passing multiple input files in `file` mode for unified migration and naming of split parts.
 - [ ] Support auto-detecting split video parts in the same directory in `dir` and `watch` modes, then applying unified migration and naming.
 - [ ] Support `tag` and other node-name mapping.

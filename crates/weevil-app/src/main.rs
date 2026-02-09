@@ -9,6 +9,7 @@ mod image_store;
 mod logging;
 mod mode_params;
 mod nfo;
+mod source_runner;
 mod watch_mode;
 
 fn main() {

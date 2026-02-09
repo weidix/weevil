@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum MultiFolderStrategy {
@@ -9,10 +9,13 @@ pub(crate) enum MultiFolderStrategy {
 
 #[derive(Debug, Clone)]
 pub(crate) struct FileModeParams {
-    script: PathBuf,
+    scripts: Vec<PathBuf>,
     output_template: String,
     input_name_rules: Vec<String>,
     folder_multi: MultiFolderStrategy,
+    multi_source: bool,
+    save_images: bool,
+    multi_source_max_sources: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -54,21 +57,27 @@ impl FetchModeParams {
 
 impl FileModeParams {
     pub(crate) fn new(
-        script: PathBuf,
+        scripts: Vec<PathBuf>,
         output_template: String,
         input_name_rules: Vec<String>,
         folder_multi: MultiFolderStrategy,
+        multi_source: bool,
+        save_images: bool,
+        multi_source_max_sources: u32,
     ) -> Self {
         Self {
-            script,
+            scripts,
             output_template,
             input_name_rules,
             folder_multi,
+            multi_source,
+            save_images,
+            multi_source_max_sources,
         }
     }
 
-    pub(crate) fn script(&self) -> &Path {
-        &self.script
+    pub(crate) fn scripts(&self) -> &[PathBuf] {
+        &self.scripts
     }
 
     pub(crate) fn output_template(&self) -> &str {
@@ -81,5 +90,17 @@ impl FileModeParams {
 
     pub(crate) fn folder_multi(&self) -> MultiFolderStrategy {
         self.folder_multi
+    }
+
+    pub(crate) fn multi_source(&self) -> bool {
+        self.multi_source
+    }
+
+    pub(crate) fn multi_source_max_sources(&self) -> u32 {
+        self.multi_source_max_sources
+    }
+
+    pub(crate) fn save_images(&self) -> bool {
+        self.save_images
     }
 }

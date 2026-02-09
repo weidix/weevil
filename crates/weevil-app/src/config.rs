@@ -20,19 +20,25 @@ pub(crate) struct AppConfig {
 
 #[derive(Debug, Clone, Default)]
 pub(crate) struct NameCliOverrides {
-    pub(crate) script: Option<PathBuf>,
+    pub(crate) scripts: Vec<PathBuf>,
     pub(crate) output: Option<PathBuf>,
+    pub(crate) multi_source: Option<bool>,
+    pub(crate) save_images: Option<bool>,
+    pub(crate) multi_source_max_sources: Option<u32>,
 }
 
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ModeCliOverrides {
-    pub(crate) script: Option<PathBuf>,
+    pub(crate) scripts: Vec<PathBuf>,
     pub(crate) output: Option<String>,
     pub(crate) input_name_rules: Vec<String>,
     pub(crate) folder_multi: Option<FolderMultiStrategy>,
     pub(crate) fetch_threads: Option<u32>,
     pub(crate) throttle_same_script: Option<bool>,
     pub(crate) script_throttle_base_ms: Option<u64>,
+    pub(crate) multi_source: Option<bool>,
+    pub(crate) save_images: Option<bool>,
+    pub(crate) multi_source_max_sources: Option<u32>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -60,12 +66,16 @@ impl AppConfig {
         &self,
         cli: &NameCliOverrides,
     ) -> Result<ResolvedNameConfig, AppError> {
-        let script = self
-            .resolve_name_script(cli)
-            .ok_or(AppError::ConfigMissingField {
+        let scripts = self
+            .resolve_name_scripts(cli)
+            .into_iter()
+            .collect::<Vec<_>>();
+        if scripts.is_empty() {
+            return Err(AppError::ConfigMissingField {
                 mode: "name",
                 field: "script",
-            })?;
+            });
+        }
 
         let output = self
             .resolve_name_output(cli)
@@ -74,7 +84,31 @@ impl AppConfig {
                 field: "output",
             })?;
 
-        Ok(ResolvedNameConfig { script, output })
+        let multi_source = cli
+            .multi_source
+            .or(self.name.multi_source)
+            .or(self.shared.multi_source)
+            .unwrap_or(false);
+
+        let save_images = cli
+            .save_images
+            .or(self.name.save_images)
+            .or(self.shared.save_images)
+            .unwrap_or(false);
+
+        let multi_source_max_sources = cli
+            .multi_source_max_sources
+            .or(self.name.multi_source_max_sources)
+            .or(self.shared.multi_source_max_sources)
+            .unwrap_or(2);
+
+        Ok(ResolvedNameConfig {
+            scripts,
+            output,
+            multi_source,
+            save_images,
+            multi_source_max_sources,
+        })
     }
 
     pub(crate) fn resolve_file_mode_with(
@@ -122,13 +156,6 @@ impl AppConfig {
         })
     }
 
-    fn resolve_name_script(&self, cli: &NameCliOverrides) -> Option<PathBuf> {
-        cli.script
-            .clone()
-            .or_else(|| self.name.script.clone())
-            .or_else(|| self.shared.script.clone())
-    }
-
     fn resolve_name_output(&self, cli: &NameCliOverrides) -> Option<PathBuf> {
         cli.output
             .clone()
@@ -139,19 +166,25 @@ impl AppConfig {
 
 #[derive(Debug, Clone)]
 pub(crate) struct ResolvedNameConfig {
-    pub(crate) script: PathBuf,
+    pub(crate) scripts: Vec<PathBuf>,
     pub(crate) output: PathBuf,
+    pub(crate) multi_source: bool,
+    pub(crate) save_images: bool,
+    pub(crate) multi_source_max_sources: u32,
 }
 
 #[derive(Debug, Clone)]
 pub(crate) struct ResolvedModeConfig {
-    pub(crate) script: PathBuf,
+    pub(crate) scripts: Vec<PathBuf>,
     pub(crate) output: String,
     pub(crate) input_name_rules: Vec<String>,
     pub(crate) folder_multi: FolderMultiStrategy,
     pub(crate) fetch_threads: u32,
     pub(crate) throttle_same_script: bool,
     pub(crate) script_throttle_base_ms: u64,
+    pub(crate) multi_source: bool,
+    pub(crate) save_images: bool,
+    pub(crate) multi_source_max_sources: u32,
 }
 
 #[derive(Debug, Clone)]
@@ -165,6 +198,7 @@ pub(crate) struct ResolvedDirConfig {
 #[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
 struct SharedConfig {
     script: Option<PathBuf>,
+    scripts: Option<StringPathList>,
     output: Option<String>,
     input_name_rule: Option<StringList>,
     folder_multi: Option<FolderMultiStrategy>,
@@ -172,19 +206,27 @@ struct SharedConfig {
     fetch_threads: Option<u32>,
     throttle_same_script: Option<bool>,
     script_throttle_base_ms: Option<u64>,
+    multi_source: Option<bool>,
+    save_images: Option<bool>,
+    multi_source_max_sources: Option<u32>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
 struct NameConfig {
     script: Option<PathBuf>,
+    scripts: Option<StringPathList>,
     output: Option<PathBuf>,
+    multi_source: Option<bool>,
+    save_images: Option<bool>,
+    multi_source_max_sources: Option<u32>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
 struct ModeConfig {
     script: Option<PathBuf>,
+    scripts: Option<StringPathList>,
     output: Option<String>,
     input_name_rule: Option<StringList>,
     folder_multi: Option<FolderMultiStrategy>,
@@ -192,6 +234,9 @@ struct ModeConfig {
     fetch_threads: Option<u32>,
     throttle_same_script: Option<bool>,
     script_throttle_base_ms: Option<u64>,
+    multi_source: Option<bool>,
+    save_images: Option<bool>,
+    multi_source_max_sources: Option<u32>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -207,6 +252,22 @@ struct DirConfig {
 enum StringList {
     One(String),
     Many(Vec<String>),
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+enum StringPathList {
+    One(PathBuf),
+    Many(Vec<PathBuf>),
+}
+
+impl StringPathList {
+    fn to_vec(&self) -> Vec<PathBuf> {
+        match self {
+            StringPathList::One(value) => vec![value.clone()],
+            StringPathList::Many(values) => values.clone(),
+        }
+    }
 }
 
 impl StringList {
@@ -237,12 +298,8 @@ fn resolve_mode_config(
     shared: &SharedConfig,
     cli: &ModeCliOverrides,
 ) -> Result<ResolvedModeConfig, AppError> {
-    let script = cli
-        .script
-        .clone()
-        .or_else(|| mode_config.script.clone())
-        .or_else(|| shared.script.clone())
-        .ok_or(AppError::ConfigMissingField {
+    let scripts =
+        resolve_mode_scripts(mode_config, shared, cli).ok_or(AppError::ConfigMissingField {
             mode,
             field: "script",
         })?;
@@ -292,15 +349,138 @@ fn resolve_mode_config(
         .or(shared.script_throttle_base_ms)
         .unwrap_or(1000);
 
+    let multi_source = cli
+        .multi_source
+        .or(mode_config.multi_source)
+        .or(shared.multi_source)
+        .unwrap_or(false);
+
+    let save_images = cli
+        .save_images
+        .or(mode_config.save_images)
+        .or(shared.save_images)
+        .unwrap_or(false);
+
+    let multi_source_max_sources = cli
+        .multi_source_max_sources
+        .or(mode_config.multi_source_max_sources)
+        .or(shared.multi_source_max_sources)
+        .unwrap_or(2);
+
     Ok(ResolvedModeConfig {
-        script,
+        scripts,
         output,
         input_name_rules,
         folder_multi,
         fetch_threads,
         throttle_same_script,
         script_throttle_base_ms,
+        multi_source,
+        save_images,
+        multi_source_max_sources,
     })
+}
+
+impl AppConfig {
+    fn resolve_name_scripts(&self, cli: &NameCliOverrides) -> Vec<PathBuf> {
+        let cli_scripts = dedupe_paths(cli.scripts.clone());
+        if !cli_scripts.is_empty() {
+            return cli_scripts;
+        }
+
+        if let Some(scripts) = self
+            .name
+            .scripts
+            .as_ref()
+            .map(StringPathList::to_vec)
+            .map(dedupe_paths)
+            .filter(|scripts| !scripts.is_empty())
+        {
+            return scripts;
+        }
+
+        if let Some(script) = self.name.script.clone() {
+            return vec![script];
+        }
+
+        if let Some(scripts) = self
+            .shared
+            .scripts
+            .as_ref()
+            .map(StringPathList::to_vec)
+            .map(dedupe_paths)
+            .filter(|scripts| !scripts.is_empty())
+        {
+            return scripts;
+        }
+
+        self.shared.script.clone().into_iter().collect()
+    }
+}
+
+fn resolve_mode_scripts(
+    mode_config: &ModeConfig,
+    shared: &SharedConfig,
+    cli: &ModeCliOverrides,
+) -> Option<Vec<PathBuf>> {
+    let cli_scripts = dedupe_paths(cli.scripts.clone());
+    if !cli_scripts.is_empty() {
+        return Some(cli_scripts);
+    }
+
+    if let Some(scripts) = mode_config
+        .scripts
+        .as_ref()
+        .map(StringPathList::to_vec)
+        .map(dedupe_paths)
+        .filter(|scripts| !scripts.is_empty())
+    {
+        return Some(scripts);
+    }
+
+    if let Some(script) = mode_config.script.clone() {
+        return Some(vec![script]);
+    }
+
+    if let Some(scripts) = shared
+        .scripts
+        .as_ref()
+        .map(StringPathList::to_vec)
+        .map(dedupe_paths)
+        .filter(|scripts| !scripts.is_empty())
+    {
+        return Some(scripts);
+    }
+
+    shared.script.clone().map(|script| vec![script])
+}
+
+fn dedupe_paths(paths: Vec<PathBuf>) -> Vec<PathBuf> {
+    let mut deduped = Vec::new();
+    for path in paths {
+        if !deduped.contains(&path) {
+            deduped.push(path);
+        }
+    }
+    deduped
+}
+
+#[cfg(test)]
+mod local_tests {
+    use super::*;
+
+    #[test]
+    fn dedupe_paths_keeps_first_order() {
+        let deduped = dedupe_paths(vec![
+            PathBuf::from("a.lua"),
+            PathBuf::from("b.lua"),
+            PathBuf::from("a.lua"),
+        ]);
+        assert_eq!(
+            deduped,
+            vec![PathBuf::from("a.lua"), PathBuf::from("b.lua")]
+        );
+    }
 }
 
 fn resolve_max_depth(mode: &ModeConfig, shared: &SharedConfig, cli: Option<i32>) -> i32 {

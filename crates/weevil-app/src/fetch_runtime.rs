@@ -29,17 +29,16 @@ pub(crate) type FetchTaskResult = (PathBuf, Result<(), String>);
 
 pub(crate) fn preflight_script(
     fetch: &FetchModeParams,
-    script_path: &Path,
+    script_paths: &[PathBuf],
 ) -> Result<(), AppError> {
-    preflight_script_for_multithread(fetch, script_path)
+    preflight_script_for_multithread(fetch, script_paths)
 }
-
 pub(crate) fn run_batch_fetch(
     files: Vec<PathBuf>,
     params: &FileModeParams,
     fetch: &FetchModeParams,
 ) -> Result<(), AppError> {
-    preflight_script_for_multithread(fetch, params.script())?;
+    preflight_script_for_multithread(fetch, params.scripts())?;
 
     if files.is_empty() {
         return Ok(());
@@ -348,21 +347,25 @@ fn random_script_delay_ms(base_ms: u64) -> u64 {
 
 fn preflight_script_for_multithread(
     fetch: &FetchModeParams,
-    script_path: &Path,
+    script_paths: &[PathBuf],
 ) -> Result<(), AppError> {
     if !fetch.multithread_enabled() {
         return Ok(());
     }
 
-    if !weevil_lua::script_uses_only_async_http_file(script_path).map_err(AppError::LuaPlugin)? {
-        return Err(AppError::ScriptSyncHttpNotAllowed {
-            path: script_path.to_path_buf(),
-        });
+    for script_path in script_paths {
+        if !weevil_lua::script_uses_only_async_http_file(script_path)
+            .map_err(AppError::LuaPlugin)?
+        {
+            return Err(AppError::ScriptSyncHttpNotAllowed {
+                path: script_path.to_path_buf(),
+            });
+        }
     }
 
     info!(
-        "multi-thread preflight passed for script {:?} (fetch_threads={}, throttle_same_script={}, script_throttle_base_ms={})",
-        script_path,
+        "multi-thread preflight passed for scripts {:?} (fetch_threads={}, throttle_same_script={}, script_throttle_base_ms={})",
+        script_paths,
         fetch.fetch_threads(),
         fetch.throttle_same_script(),
         fetch.script_throttle_base_ms()

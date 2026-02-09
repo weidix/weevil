@@ -46,7 +46,7 @@ pub(crate) fn run_watch_mode(
     fetch: &FetchModeParams,
     max_depth: i32,
 ) -> Result<(), AppError> {
-    fetch_runtime::preflight_script(fetch, params.script())?;
+    fetch_runtime::preflight_script(fetch, params.scripts())?;
 
     let mut seen = dir_mode::scan_video_files(input, max_depth)?
         .into_iter()

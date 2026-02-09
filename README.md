@@ -106,13 +106,13 @@ CLI supports full options for each mode; config provides reusable defaults.
 
 Reusable defaults live in config (`weevil.toml`):
 
-- Shared defaults: `script`, `output`, `input-name-rule`, `folder-multi`, `max-depth`
+- Shared defaults: `script`/`scripts`, `output`, `input-name-rule`, `folder-multi`, `max-depth`, `multi-source`, `save-images`, `multi-source-max-sources`
 - Fetch scheduling defaults: `fetch-threads`, `throttle-same-script`, `script-throttle-base-ms`
 - Mode defaults:
-  - `[name]`: `script`, `output`
-  - `[file]`: `script`, `output`, `input-name-rule`, `folder-multi`
-  - `[dir]`: `input`, `script`, `output`, `input-name-rule`, `folder-multi`, `max-depth`, `fetch-threads`, `throttle-same-script`, `script-throttle-base-ms`
-  - `[watch]`: `input`, `script`, `output`, `input-name-rule`, `folder-multi`, `max-depth`, `fetch-threads`, `throttle-same-script`, `script-throttle-base-ms`
+  - `[name]`: `script`/`scripts`, `output`, `multi-source`, `save-images`, `multi-source-max-sources`
+  - `[file]`: `script`/`scripts`, `output`, `input-name-rule`, `folder-multi`, `multi-source`, `save-images`, `multi-source-max-sources`
+  - `[dir]`: `input`, `script`/`scripts`, `output`, `input-name-rule`, `folder-multi`, `max-depth`, `fetch-threads`, `throttle-same-script`, `script-throttle-base-ms`, `multi-source`, `save-images`, `multi-source-max-sources`
+  - `[watch]`: `input`, `script`/`scripts`, `output`, `input-name-rule`, `folder-multi`, `max-depth`, `fetch-threads`, `throttle-same-script`, `script-throttle-base-ms`, `multi-source`, `save-images`, `multi-source-max-sources`
 
 Config loading order:
 
@@ -124,7 +124,7 @@ Example `weevil.toml`:
 
 ```toml
 [shared]
-script = "demo_lua/source_alpha/lua/source_alpha.lua"
+scripts = ["demo_lua/source_alpha/lua/source_alpha.lua", "demo_lua/source_alpha/lua/source_alpha_mirror.lua"]
 output = "./library/{title}"
 input-name-rule = ["1080p,WEB-DL", "regex:\\[[^\\]]+\\]", "replace:_=> "]
 folder-multi = "first"
@@ -132,9 +132,13 @@ max-depth = -1
 fetch-threads = 1
 throttle-same-script = false
 script-throttle-base-ms = 1000
+multi-source = false
+save-images = false
+multi-source-max-sources = 2
 
 [name]
 output = "./sample.nfo"
+save-images = false
 
 [file]
 folder-multi = "first"
@@ -174,6 +178,17 @@ Quick mixed usage example (CLI overrides only one field):
 cargo run -p weevil-app -- dir --max-depth 1
 ```
 
+### Multi-script and multi-source behavior
+
+- `--script` can be repeated to pass multiple scripts (order matters).
+- When `multi-source=false` (default): scripts run in order and stop at the first successful script.
+- When `multi-source=true`: scripts run in order, successful results are merged, and fetching stops when reaching `multi-source-max-sources` (or end of scripts).
+- `--multi-source` is a boolean flag (default off); passing it enables aggregation.
+- `--save-images` is a boolean flag (default off); passing it enables local image saving.
+- `--throttle-same-script` is a boolean flag (default off); passing it enables same-script throttling.
+- `multi-source-max-sources=0` means no source-count limit.
+- Aggregation merges empty fields from later sources and combines `tag` / `genre` / `actor` / `fanart.thumb` / cross-platform `ratings` without duplicate entries.
+
 ### 1) `name`
 
 Generate one NFO by title string.
@@ -182,6 +197,10 @@ Generate one NFO by title string.
 cargo run -p weevil-app -- name \
   --name "sample title" \
   --script demo_lua/source_alpha/lua/source_alpha.lua \
+  --script demo_lua/source_alpha/lua/source_alpha_mirror.lua \
+  --multi-source \
+  --save-images \
+  --multi-source-max-sources 2 \
   --output ./sample.nfo
 ```
 
@@ -231,7 +250,7 @@ cargo run -p weevil-app -- watch \
   --output "./library/{title}" \
   --max-depth -1 \
   --fetch-threads 4 \
-  --throttle-same-script true
+  --throttle-same-script
 ```
 
 Watch behavior today:

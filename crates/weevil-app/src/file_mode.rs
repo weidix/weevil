@@ -1,15 +1,12 @@
-use crate::app::{TaskContext, render_nfo_output};
+use crate::app::TaskContext;
 use crate::errors::{AppError, LinkKind};
 use crate::image_store::localize_movie_images;
 use crate::mode_params::{FileModeParams, MultiFolderStrategy};
-use crate::nfo::Movie;
+use crate::source_runner;
 use fs2::FileExt;
-use quick_xml::de::from_str;
-use serde::Serialize;
 use std::fs;
 use std::fs::File;
 use std::path::{Path, PathBuf};
-use weevil_lua::LuaPlugin;
 
 mod input_name;
 mod naming;
@@ -27,13 +24,16 @@ pub(crate) fn run_file_mode(input: &Path, params: &FileModeParams) -> Result<(),
     let input_path = path_to_string(input)?;
 
     let task = TaskContext::new("file");
-    let plugin = LuaPlugin::from_file(params.script()).map_err(AppError::LuaPlugin)?;
-    plugin.set_log_context(task.id.clone(), task.kind);
-    let value = plugin
-        .call((input_name.as_str(), input_path.as_str()))
-        .map_err(AppError::LuaPlugin)?;
-    let xml = render_nfo_output(value, plugin.lua())?;
-    let mut movie: Movie = from_str(&xml).map_err(AppError::NfoParse)?;
+    let source_output = source_runner::run_file_scripts(
+        &task.id,
+        task.kind,
+        params.scripts(),
+        params.multi_source(),
+        params.multi_source_max_sources(),
+        input_name.as_str(),
+        input_path.as_str(),
+    )?;
+    let mut movie = source_output.movie;
 
     let output_paths = format_output_paths(params.output_template(), &movie, &input_stem)?;
     let selected = select_output_paths(
@@ -49,16 +49,26 @@ pub(crate) fn run_file_mode(input: &Path, params: &FileModeParams) -> Result<(),
         ensure_output_dir(&output.dir)?;
     }
 
-    let localized_images = localize_movie_images(
-        &mut movie,
-        &primary_output.dir,
-        &primary_output.file_base,
-        plugin.trusted_urls(),
-    )?;
-    let xml_output = if localized_images.is_empty() {
-        xml
+    let (localized_images, xml_output) = if params.save_images() {
+        let localized_images = localize_movie_images(
+            &mut movie,
+            &primary_output.dir,
+            &primary_output.file_base,
+            &source_output.trusted_urls,
+        )?;
+        let xml_output = if localized_images.is_empty() && !source_output.merged_sources {
+            source_output.xml
+        } else {
+            source_runner::serialize_movie(&movie)?
+        };
+        (localized_images, xml_output)
     } else {
-        serialize_movie(&movie)?
+        let xml_output = if source_output.merged_sources {
+            source_runner::serialize_movie(&movie)?
+        } else {
+            source_output.xml
+        };
+        (Vec::new(), xml_output)
     };
 
     let input_extension = extension_string(input)?;
@@ -378,16 +388,6 @@ fn create_links(
     }
     create_link(strategy, &primary.nfo, &targets.nfo)?;
     Ok(())
-}
-
-fn serialize_movie(movie: &Movie) -> Result<String, AppError> {
-    let mut buffer = String::new();
-    let mut serializer = quick_xml::se::Serializer::new(&mut buffer);
-    serializer.indent(' ', 2);
-    movie
-        .serialize(serializer)
-        .map_err(AppError::SerializeNfo)?;
-    Ok(buffer)
 }
 
 fn create_link(strategy: MultiFolderStrategy, from: &Path, to: &Path) -> Result<(), AppError> {

@@ -3,7 +3,8 @@
 
 [shared]
 # Reusable defaults for all modes
-script = "scripts/source_primary.lua"
+# use `script` for single source, or `scripts` for ordered multi-source list
+scripts = ["scripts/source_primary.lua", "scripts/source_secondary.lua"]
 output = "./library/{title}"
 input-name-rule = [
   "1080p,WEB-DL",
@@ -15,10 +16,14 @@ max-depth = -1
 fetch-threads = 1 # 1=serial, >1=parallel limit, 0=unlimited
 throttle-same-script = false # add ~1000ms random delay and prevent same-script overlap across tasks
 script-throttle-base-ms = 1000 # effective wait ~= base ±100ms
+multi-source = false # false: stop at first successful script; true: aggregate successful sources
+save-images = false # download and save remote poster/fanart images locally
+multi-source-max-sources = 2 # stop after N successful sources when multi-source=true; 0 means unlimited
 
 [name]
 # name mode output file path (NFO)
 output = "./output/name-mode.nfo"
+# save-images = true
 
 [file]
 # file mode-specific overrides (optional)

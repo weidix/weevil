@@ -22,8 +22,11 @@ output = "outputs/name.nfo"
     let resolved = config
         .resolve_name_with(&NameCliOverrides::default())
         .expect("expected resolved name");
-    assert_eq!(resolved.script, Path::new("scripts/name.lua"));
+    assert_eq!(resolved.scripts, vec![Path::new("scripts/name.lua")]);
     assert_eq!(resolved.output, Path::new("outputs/name.nfo"));
+    assert!(!resolved.multi_source);
+    assert!(!resolved.save_images);
+    assert_eq!(resolved.multi_source_max_sources, 2);
 }
 
 #[test]
@@ -40,7 +43,7 @@ output = "outputs/name.nfo"
     let resolved = config
         .resolve_name_with(&NameCliOverrides::default())
         .expect("expected resolved name");
-    assert_eq!(resolved.script, Path::new("scripts/shared.lua"));
+    assert_eq!(resolved.scripts, vec![Path::new("scripts/shared.lua")]);
     assert_eq!(resolved.output, Path::new("outputs/name.nfo"));
 }
 
@@ -66,13 +69,16 @@ folder-multi = "soft-link"
     let resolved = config
         .resolve_file_mode_with(&ModeCliOverrides::default())
         .expect("expected resolved file config");
-    assert_eq!(resolved.script, Path::new("scripts/file.lua"));
+    assert_eq!(resolved.scripts, vec![Path::new("scripts/file.lua")]);
     assert_eq!(resolved.output, "library/file/{title}");
     assert_eq!(resolved.input_name_rules, vec!["regex:\\[[^\\]]+\\]"]);
     assert_eq!(resolved.folder_multi, FolderMultiStrategy::SoftLink);
     assert_eq!(resolved.fetch_threads, 1);
     assert!(!resolved.throttle_same_script);
     assert_eq!(resolved.script_throttle_base_ms, 1000);
+    assert!(!resolved.multi_source);
+    assert!(!resolved.save_images);
+    assert_eq!(resolved.multi_source_max_sources, 2);
 }
 
 #[test]
@@ -96,13 +102,14 @@ input = "incoming"
         .resolve_dir_mode_with(&DirCliOverrides::default())
         .expect("expected resolved dir config");
     assert_eq!(resolved.input, Path::new("incoming"));
-    assert_eq!(resolved.mode.script, Path::new("scripts/shared.lua"));
+    assert_eq!(resolved.mode.scripts, vec![Path::new("scripts/shared.lua")]);
     assert_eq!(resolved.mode.output, "library/{title}");
     assert_eq!(resolved.mode.input_name_rules, vec!["replace:_=> "]);
     assert_eq!(resolved.mode.folder_multi, FolderMultiStrategy::HardLink);
     assert_eq!(resolved.mode.fetch_threads, 1);
     assert!(!resolved.mode.throttle_same_script);
     assert_eq!(resolved.mode.script_throttle_base_ms, 1000);
+    assert!(!resolved.mode.save_images);
     assert_eq!(resolved.max_depth, 2);
 }
 
@@ -244,23 +251,29 @@ folder-multi = "hard-link"
 
     let resolved = config
         .resolve_file_mode_with(&ModeCliOverrides {
-            script: Some("scripts/cli.lua".into()),
+            scripts: vec!["scripts/cli.lua".into()],
             output: Some("library/cli/{title}".to_string()),
             input_name_rules: vec!["replace:_=> ".to_string()],
             folder_multi: Some(FolderMultiStrategy::SoftLink),
             fetch_threads: Some(4),
             throttle_same_script: Some(true),
             script_throttle_base_ms: Some(1500),
+            multi_source: Some(true),
+            save_images: Some(true),
+            multi_source_max_sources: Some(3),
         })
         .expect("expected resolved config");
 
-    assert_eq!(resolved.script, Path::new("scripts/cli.lua"));
+    assert_eq!(resolved.scripts, vec![Path::new("scripts/cli.lua")]);
     assert_eq!(resolved.output, "library/cli/{title}");
     assert_eq!(resolved.input_name_rules, vec!["replace:_=> "]);
     assert_eq!(resolved.folder_multi, FolderMultiStrategy::SoftLink);
     assert_eq!(resolved.fetch_threads, 4);
     assert!(resolved.throttle_same_script);
     assert_eq!(resolved.script_throttle_base_ms, 1500);
+    assert!(resolved.multi_source);
+    assert!(resolved.save_images);
+    assert_eq!(resolved.multi_source_max_sources, 3);
 }
 
 #[test]
@@ -283,24 +296,30 @@ max-depth = 2
         .resolve_dir_mode_with(&DirCliOverrides {
             input: Some("from-cli".into()),
             mode: ModeCliOverrides {
-                script: Some("scripts/cli.lua".into()),
+                scripts: vec!["scripts/cli.lua".into()],
                 output: Some("library/cli/{title}".to_string()),
                 input_name_rules: vec![],
                 folder_multi: None,
                 fetch_threads: Some(2),
                 throttle_same_script: Some(true),
                 script_throttle_base_ms: Some(1800),
+                multi_source: Some(true),
+                save_images: Some(true),
+                multi_source_max_sources: Some(4),
             },
             max_depth: Some(1),
         })
         .expect("expected resolved config");
 
     assert_eq!(resolved.input, Path::new("from-cli"));
-    assert_eq!(resolved.mode.script, Path::new("scripts/cli.lua"));
+    assert_eq!(resolved.mode.scripts, vec![Path::new("scripts/cli.lua")]);
     assert_eq!(resolved.mode.output, "library/cli/{title}");
     assert_eq!(resolved.mode.fetch_threads, 2);
     assert!(resolved.mode.throttle_same_script);
     assert_eq!(resolved.mode.script_throttle_base_ms, 1800);
+    assert!(resolved.mode.multi_source);
+    assert!(resolved.mode.save_images);
+    assert_eq!(resolved.mode.multi_source_max_sources, 4);
     assert_eq!(resolved.max_depth, 1);
 }
 
@@ -328,6 +347,9 @@ throttle-same-script = true
     assert_eq!(resolved.mode.fetch_threads, 6);
     assert!(resolved.mode.throttle_same_script);
     assert_eq!(resolved.mode.script_throttle_base_ms, 1350);
+    assert!(!resolved.mode.multi_source);
+    assert!(!resolved.mode.save_images);
+    assert_eq!(resolved.mode.multi_source_max_sources, 2);
 }
 
 #[test]
@@ -346,11 +368,80 @@ output = "from-name-config.nfo"
 
     let resolved = config
         .resolve_name_with(&NameCliOverrides {
-            script: Some("scripts/cli.lua".into()),
+            scripts: vec!["scripts/cli.lua".into()],
             output: Some("from-cli.nfo".into()),
+            multi_source: Some(true),
+            save_images: Some(true),
+            multi_source_max_sources: Some(5),
         })
         .expect("expected resolved name");
 
-    assert_eq!(resolved.script, Path::new("scripts/cli.lua"));
+    assert_eq!(resolved.scripts, vec![Path::new("scripts/cli.lua")]);
     assert_eq!(resolved.output, Path::new("from-cli.nfo"));
+    assert!(resolved.multi_source);
+    assert!(resolved.save_images);
+    assert_eq!(resolved.multi_source_max_sources, 5);
+}
+
+#[test]
+fn resolve_name_mode_save_images_defaults_to_false() {
+    let config: AppConfig = toml::from_str(
+        r#"
+[shared]
+script = "scripts/shared.lua"
+output = "from-config.nfo"
+"#,
+    )
+    .expect("expected config");
+
+    let resolved = config
+        .resolve_name_with(&NameCliOverrides::default())
+        .expect("resolved");
+
+    assert!(!resolved.save_images);
+}
+
+#[test]
+fn resolve_file_mode_uses_scripts_list_from_config() {
+    let config: AppConfig = toml::from_str(
+        r#"
+[shared]
+scripts = ["scripts/a.lua", "scripts/b.lua"]
+output = "library/{title}"
+multi-source = true
+save-images = true
+multi-source-max-sources = 6
+"#,
+    )
+    .expect("expected config");
+
+    let resolved = config
+        .resolve_file_mode_with(&ModeCliOverrides::default())
+        .expect("resolved");
+
+    assert_eq!(
+        resolved.scripts,
+        vec![Path::new("scripts/a.lua"), Path::new("scripts/b.lua")]
+    );
+    assert!(resolved.multi_source);
+    assert!(resolved.save_images);
+    assert_eq!(resolved.multi_source_max_sources, 6);
+}
+
+#[test]
+fn resolve_file_mode_save_images_defaults_to_false() {
+    let config: AppConfig = toml::from_str(
+        r#"
+[shared]
+script = "scripts/shared.lua"
+output = "library/{title}"
+"#,
+    )
+    .expect("expected config");
+
+    let resolved = config
+        .resolve_file_mode_with(&ModeCliOverrides::default())
+        .expect("resolved");
+
+    assert!(!resolved.save_images);
 }

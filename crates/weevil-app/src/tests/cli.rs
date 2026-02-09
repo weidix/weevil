@@ -18,13 +18,56 @@ fn parse_name_command() {
 
     if let Command::Name {
         name,
-        script,
+        scripts,
         output,
+        multi_source,
+        save_images,
+        multi_source_max_sources,
     } = cli.command
     {
         assert_eq!(name, "Spirited Away");
-        assert_eq!(script, Some(PathBuf::from("script.lua")));
+        assert_eq!(scripts, vec![PathBuf::from("script.lua")]);
         assert_eq!(output, Some(PathBuf::from("movie.nfo")));
+        assert!(!multi_source);
+        assert!(!save_images);
+        assert_eq!(multi_source_max_sources, None);
+    } else {
+        panic!("expected name command");
+    }
+}
+
+#[test]
+fn parse_name_multi_scripts_and_multi_source() {
+    let cli = Cli::try_parse_from([
+        "weevil",
+        "name",
+        "--name",
+        "Movie",
+        "--script",
+        "a.lua",
+        "--script",
+        "b.lua",
+        "--multi-source",
+        "--multi-source-max-sources",
+        "3",
+    ])
+    .expect("expected command");
+
+    if let Command::Name {
+        scripts,
+        multi_source,
+        save_images,
+        multi_source_max_sources,
+        ..
+    } = cli.command
+    {
+        assert_eq!(
+            scripts,
+            vec![PathBuf::from("a.lua"), PathBuf::from("b.lua")]
+        );
+        assert!(multi_source);
+        assert!(!save_images);
+        assert_eq!(multi_source_max_sources, Some(3));
     } else {
         panic!("expected name command");
     }
@@ -69,17 +112,23 @@ fn parse_file_mode() {
 
     if let Command::File {
         input,
-        script,
+        scripts,
         output,
         input_name_rules,
         folder_multi,
+        multi_source,
+        save_images,
+        multi_source_max_sources,
     } = cli.command
     {
         assert_eq!(input, PathBuf::from("movie.mkv"));
-        assert_eq!(script, Some(PathBuf::from("script.lua")));
+        assert_eq!(scripts, vec![PathBuf::from("script.lua")]);
         assert_eq!(output, Some("library/{title}".to_string()));
         assert_eq!(input_name_rules, vec!["1080p,WEB-DL"]);
         assert_eq!(folder_multi, Some(FolderMultiStrategy::HardLink));
+        assert!(!multi_source);
+        assert!(!save_images);
+        assert_eq!(multi_source_max_sources, None);
     } else {
         panic!("expected file command");
     }
@@ -107,7 +156,7 @@ fn parse_dir_mode() {
 
     if let Command::Dir {
         input,
-        script,
+        scripts,
         output,
         input_name_rules,
         folder_multi,
@@ -115,17 +164,23 @@ fn parse_dir_mode() {
         fetch_threads,
         throttle_same_script,
         script_throttle_base_ms,
+        multi_source,
+        save_images,
+        multi_source_max_sources,
     } = cli.command
     {
         assert_eq!(input, Some(PathBuf::from("videos")));
-        assert_eq!(script, Some(PathBuf::from("script.lua")));
+        assert_eq!(scripts, vec![PathBuf::from("script.lua")]);
         assert_eq!(output, Some("library/{title}".to_string()));
         assert_eq!(input_name_rules, vec!["regex:\\[[^\\]]+\\]"]);
         assert_eq!(folder_multi, Some(FolderMultiStrategy::SoftLink));
         assert_eq!(max_depth, Some(2));
         assert_eq!(fetch_threads, None);
-        assert_eq!(throttle_same_script, None);
+        assert!(!throttle_same_script);
         assert_eq!(script_throttle_base_ms, None);
+        assert!(!multi_source);
+        assert!(!save_images);
+        assert_eq!(multi_source_max_sources, None);
     } else {
         panic!("expected dir command");
     }
@@ -149,14 +204,20 @@ fn parse_watch_mode() {
         fetch_threads,
         throttle_same_script,
         script_throttle_base_ms,
+        multi_source,
+        save_images,
+        multi_source_max_sources,
         ..
     } = cli.command
     {
         assert_eq!(input, Some(PathBuf::from("incoming")));
         assert_eq!(max_depth, Some(-1));
         assert_eq!(fetch_threads, None);
-        assert_eq!(throttle_same_script, None);
+        assert!(!throttle_same_script);
         assert_eq!(script_throttle_base_ms, None);
+        assert!(!multi_source);
+        assert!(!save_images);
+        assert_eq!(multi_source_max_sources, None);
     } else {
         panic!("expected watch command");
     }
@@ -172,7 +233,6 @@ fn parse_dir_multithread_options() {
         "--fetch-threads",
         "0",
         "--throttle-same-script",
-        "true",
         "--script-throttle-base-ms",
         "1600",
     ])
@@ -186,10 +246,34 @@ fn parse_dir_multithread_options() {
     } = cli.command
     {
         assert_eq!(fetch_threads, Some(0));
-        assert_eq!(throttle_same_script, Some(true));
+        assert!(throttle_same_script);
         assert_eq!(script_throttle_base_ms, Some(1600));
     } else {
         panic!("expected dir command");
+    }
+}
+
+#[test]
+fn parse_file_save_images_option() {
+    let cli = Cli::try_parse_from(["weevil", "file", "--input", "movie.mkv", "--save-images"])
+        .expect("expected command");
+
+    if let Command::File { save_images, .. } = cli.command {
+        assert!(save_images);
+    } else {
+        panic!("expected file command");
+    }
+}
+
+#[test]
+fn parse_name_save_images_option() {
+    let cli = Cli::try_parse_from(["weevil", "name", "--name", "movie", "--save-images"])
+        .expect("expected command");
+
+    if let Command::Name { save_images, .. } = cli.command {
+        assert!(save_images);
+    } else {
+        panic!("expected name command");
     }
 }
 
