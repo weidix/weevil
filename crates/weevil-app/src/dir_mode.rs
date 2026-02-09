@@ -3,8 +3,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::errors::AppError;
-use crate::file_mode;
-use crate::mode_params::FileModeParams;
+use crate::fetch_runtime;
+use crate::mode_params::{FetchModeParams, FileModeParams};
 
 const VIDEO_EXTENSIONS: &[&str] = &[
     "mkv", "mp4", "avi", "mov", "m4v", "wmv", "flv", "webm", "ts", "m2ts", "mts", "mpg", "mpeg",
@@ -13,14 +13,12 @@ const VIDEO_EXTENSIONS: &[&str] = &[
 pub(crate) fn run_dir_mode(
     input: &Path,
     params: &FileModeParams,
+    fetch: &FetchModeParams,
     max_depth: i32,
 ) -> Result<(), AppError> {
     let mut files = scan_video_files(input, max_depth)?;
     files.sort();
-    for file in files {
-        file_mode::run_file_mode(&file, params)?;
-    }
-    Ok(())
+    fetch_runtime::run_batch_fetch(files, params, fetch)
 }
 
 pub(crate) fn scan_video_files(input: &Path, max_depth: i32) -> Result<Vec<PathBuf>, AppError> {

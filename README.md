@@ -23,6 +23,7 @@ parsing, anti-bot handling, field mapping) is provided by scripts, currently via
 - Batch process a directory (`dir` mode) with optional max traversal depth.
 - Continuous folder watching (`watch` mode) for newly completed video files.
 - Multi-output routing by template + optional hard-link/soft-link fan-out.
+- Multi-threaded fetching for `dir` / `watch` (cross-file concurrency only; no multi-script concurrency inside one file).
 
 ## Build and Run
 
@@ -106,11 +107,12 @@ CLI supports full options for each mode; config provides reusable defaults.
 Reusable defaults live in config (`weevil.toml`):
 
 - Shared defaults: `script`, `output`, `input-name-rule`, `folder-multi`, `max-depth`
+- Fetch scheduling defaults: `fetch-threads`, `throttle-same-script`, `script-throttle-base-ms`
 - Mode defaults:
   - `[name]`: `script`, `output`
   - `[file]`: `script`, `output`, `input-name-rule`, `folder-multi`
-  - `[dir]`: `input`, `script`, `output`, `input-name-rule`, `folder-multi`, `max-depth`
-  - `[watch]`: `input`, `script`, `output`, `input-name-rule`, `folder-multi`, `max-depth`
+  - `[dir]`: `input`, `script`, `output`, `input-name-rule`, `folder-multi`, `max-depth`, `fetch-threads`, `throttle-same-script`, `script-throttle-base-ms`
+  - `[watch]`: `input`, `script`, `output`, `input-name-rule`, `folder-multi`, `max-depth`, `fetch-threads`, `throttle-same-script`, `script-throttle-base-ms`
 
 Config loading order:
 
@@ -127,6 +129,9 @@ output = "./library/{title}"
 input-name-rule = ["1080p,WEB-DL", "regex:\\[[^\\]]+\\]", "replace:_=> "]
 folder-multi = "first"
 max-depth = -1
+fetch-threads = 1
+throttle-same-script = false
+script-throttle-base-ms = 1000
 
 [name]
 output = "./sample.nfo"
@@ -140,6 +145,26 @@ input = "./videos"
 [watch]
 input = "./incoming"
 ```
+
+### Multi-thread fetch options (`dir` / `watch`)
+
+- `fetch-threads`
+  - `1`: serial processing
+  - `>1`: limited concurrency by configured worker count
+  - `0`: unlimited concurrency (up to task count)
+- `throttle-same-script`
+  - `true`: different tasks will not execute the same script concurrently; a random delay is inserted between script runs
+  - `false`: no extra script-level throttling
+- `script-throttle-base-ms`
+  - base random delay in milliseconds for same-script throttling
+  - actual wait is roughly `base ± 100ms` (minimum 0)
+  - when `base = 0`, random delay is disabled (always `0ms`)
+  - when `base < 100`, delay uses absolute value (`abs(base + offset)`)
+
+Important behavior:
+
+- Multi-threading is file-level only (different files in parallel), not parallel scripts within one file task.
+- When multi-threading is enabled (`fetch-threads = 0` or `> 1`), startup preflight rejects Lua scripts using synchronous HTTP APIs (`weevil.http.get` / `weevil.http.post`). Use async APIs (`weevil.http.get_async` / `weevil.http.post_async`) instead.
 
 Quick mixed usage example (CLI overrides only one field):
 
@@ -204,7 +229,9 @@ cargo run -p weevil-app -- watch \
   --input ./incoming \
   --script demo_lua/source_alpha/lua/source_alpha.lua \
   --output "./library/{title}" \
-  --max-depth -1
+  --max-depth -1 \
+  --fetch-threads 4 \
+  --throttle-same-script true
 ```
 
 Watch behavior today:

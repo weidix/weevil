@@ -3,6 +3,7 @@ mod cli;
 mod config;
 mod dir_mode;
 mod errors;
+mod fetch_runtime;
 mod file_mode;
 mod image_store;
 mod logging;

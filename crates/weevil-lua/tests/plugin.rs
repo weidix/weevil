@@ -3,7 +3,7 @@ use std::fmt;
 use std::sync::{Arc, Mutex, Once, OnceLock};
 
 use tracing_subscriber::prelude::*;
-use weevil_lua::{LuaPlugin, check_script};
+use weevil_lua::{LuaPlugin, check_script, script_uses_only_async_http};
 
 struct FieldLayer {
     records: Arc<Mutex<Vec<HashMap<String, String>>>>,
@@ -403,4 +403,46 @@ return {
     let plugin = LuaPlugin::from_str(script).expect("load plugin");
     let err = plugin.call(()).expect_err("should fail");
     assert!(err.to_string().contains("unsupported Lua value function"));
+}
+
+#[test]
+fn async_http_preflight_accepts_async_calls() {
+    let script = r#"
+return {
+  trusted_urls = { "https://example.com/" },
+  run = function()
+    return weevil.http.get_async("https://example.com/")
+  end
+}
+"#;
+    let ok = script_uses_only_async_http(script).expect("check script");
+    assert!(ok);
+}
+
+#[test]
+fn async_http_preflight_rejects_blocking_get() {
+    let script = r#"
+return {
+  trusted_urls = { "https://example.com/" },
+  run = function()
+    return weevil.http.get("https://example.com/")
+  end
+}
+"#;
+    let ok = script_uses_only_async_http(script).expect("check script");
+    assert!(!ok);
+}
+
+#[test]
+fn async_http_preflight_rejects_blocking_post() {
+    let script = r#"
+return {
+  trusted_urls = { "https://example.com/" },
+  run = function()
+    return weevil.http.post("https://example.com/", "{}")
+  end
+}
+"#;
+    let ok = script_uses_only_async_http(script).expect("check script");
+    assert!(!ok);
 }

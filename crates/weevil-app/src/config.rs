@@ -30,6 +30,9 @@ pub(crate) struct ModeCliOverrides {
     pub(crate) output: Option<String>,
     pub(crate) input_name_rules: Vec<String>,
     pub(crate) folder_multi: Option<FolderMultiStrategy>,
+    pub(crate) fetch_threads: Option<u32>,
+    pub(crate) throttle_same_script: Option<bool>,
+    pub(crate) script_throttle_base_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -146,6 +149,9 @@ pub(crate) struct ResolvedModeConfig {
     pub(crate) output: String,
     pub(crate) input_name_rules: Vec<String>,
     pub(crate) folder_multi: FolderMultiStrategy,
+    pub(crate) fetch_threads: u32,
+    pub(crate) throttle_same_script: bool,
+    pub(crate) script_throttle_base_ms: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -163,6 +169,9 @@ struct SharedConfig {
     input_name_rule: Option<StringList>,
     folder_multi: Option<FolderMultiStrategy>,
     max_depth: Option<i32>,
+    fetch_threads: Option<u32>,
+    throttle_same_script: Option<bool>,
+    script_throttle_base_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -180,6 +189,9 @@ struct ModeConfig {
     input_name_rule: Option<StringList>,
     folder_multi: Option<FolderMultiStrategy>,
     max_depth: Option<i32>,
+    fetch_threads: Option<u32>,
+    throttle_same_script: Option<bool>,
+    script_throttle_base_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -262,11 +274,32 @@ fn resolve_mode_config(
         .or(shared.folder_multi)
         .unwrap_or(FolderMultiStrategy::First);
 
+    let fetch_threads = cli
+        .fetch_threads
+        .or(mode_config.fetch_threads)
+        .or(shared.fetch_threads)
+        .unwrap_or(1);
+
+    let throttle_same_script = cli
+        .throttle_same_script
+        .or(mode_config.throttle_same_script)
+        .or(shared.throttle_same_script)
+        .unwrap_or(false);
+
+    let script_throttle_base_ms = cli
+        .script_throttle_base_ms
+        .or(mode_config.script_throttle_base_ms)
+        .or(shared.script_throttle_base_ms)
+        .unwrap_or(1000);
+
     Ok(ResolvedModeConfig {
         script,
         output,
         input_name_rules,
         folder_multi,
+        fetch_threads,
+        throttle_same_script,
+        script_throttle_base_ms,
     })
 }
 

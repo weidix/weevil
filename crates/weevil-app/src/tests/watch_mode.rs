@@ -1,5 +1,7 @@
 use std::fs;
 use std::path::Path;
+use std::path::PathBuf;
+use std::time::Instant;
 
 use super::*;
 
@@ -54,4 +56,18 @@ fn path_within_max_depth_respects_limits() {
         Path::new("/watch/deep/path/movie.mkv"),
         -1,
     ));
+}
+
+#[test]
+fn collect_ready_files_skips_seen_items() {
+    let path = PathBuf::from("/tmp/already-seen.mkv");
+    let mut seen = std::collections::HashSet::new();
+    seen.insert(path.clone());
+
+    let mut pending = std::collections::HashMap::new();
+    pending.insert(path.clone(), PendingFile::new(0, Instant::now()));
+
+    let ready = collect_ready_files(&seen, &mut pending);
+    assert!(ready.is_empty());
+    assert!(!pending.contains_key(&path));
 }

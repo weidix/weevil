@@ -70,6 +70,9 @@ folder-multi = "soft-link"
     assert_eq!(resolved.output, "library/file/{title}");
     assert_eq!(resolved.input_name_rules, vec!["regex:\\[[^\\]]+\\]"]);
     assert_eq!(resolved.folder_multi, FolderMultiStrategy::SoftLink);
+    assert_eq!(resolved.fetch_threads, 1);
+    assert!(!resolved.throttle_same_script);
+    assert_eq!(resolved.script_throttle_base_ms, 1000);
 }
 
 #[test]
@@ -97,6 +100,9 @@ input = "incoming"
     assert_eq!(resolved.mode.output, "library/{title}");
     assert_eq!(resolved.mode.input_name_rules, vec!["replace:_=> "]);
     assert_eq!(resolved.mode.folder_multi, FolderMultiStrategy::HardLink);
+    assert_eq!(resolved.mode.fetch_threads, 1);
+    assert!(!resolved.mode.throttle_same_script);
+    assert_eq!(resolved.mode.script_throttle_base_ms, 1000);
     assert_eq!(resolved.max_depth, 2);
 }
 
@@ -242,6 +248,9 @@ folder-multi = "hard-link"
             output: Some("library/cli/{title}".to_string()),
             input_name_rules: vec!["replace:_=> ".to_string()],
             folder_multi: Some(FolderMultiStrategy::SoftLink),
+            fetch_threads: Some(4),
+            throttle_same_script: Some(true),
+            script_throttle_base_ms: Some(1500),
         })
         .expect("expected resolved config");
 
@@ -249,6 +258,9 @@ folder-multi = "hard-link"
     assert_eq!(resolved.output, "library/cli/{title}");
     assert_eq!(resolved.input_name_rules, vec!["replace:_=> "]);
     assert_eq!(resolved.folder_multi, FolderMultiStrategy::SoftLink);
+    assert_eq!(resolved.fetch_threads, 4);
+    assert!(resolved.throttle_same_script);
+    assert_eq!(resolved.script_throttle_base_ms, 1500);
 }
 
 #[test]
@@ -275,6 +287,9 @@ max-depth = 2
                 output: Some("library/cli/{title}".to_string()),
                 input_name_rules: vec![],
                 folder_multi: None,
+                fetch_threads: Some(2),
+                throttle_same_script: Some(true),
+                script_throttle_base_ms: Some(1800),
             },
             max_depth: Some(1),
         })
@@ -283,7 +298,36 @@ max-depth = 2
     assert_eq!(resolved.input, Path::new("from-cli"));
     assert_eq!(resolved.mode.script, Path::new("scripts/cli.lua"));
     assert_eq!(resolved.mode.output, "library/cli/{title}");
+    assert_eq!(resolved.mode.fetch_threads, 2);
+    assert!(resolved.mode.throttle_same_script);
+    assert_eq!(resolved.mode.script_throttle_base_ms, 1800);
     assert_eq!(resolved.max_depth, 1);
+}
+
+#[test]
+fn resolve_dir_mode_multithread_from_config() {
+    let config: AppConfig = toml::from_str(
+        r#"
+[shared]
+script = "scripts/shared.lua"
+output = "library/{title}"
+fetch-threads = 6
+script-throttle-base-ms = 1350
+
+[dir]
+input = "incoming"
+throttle-same-script = true
+"#,
+    )
+    .expect("expected config");
+
+    let resolved = config
+        .resolve_dir_mode_with(&DirCliOverrides::default())
+        .expect("expected resolved dir config");
+
+    assert_eq!(resolved.mode.fetch_threads, 6);
+    assert!(resolved.mode.throttle_same_script);
+    assert_eq!(resolved.mode.script_throttle_base_ms, 1350);
 }
 
 #[test]

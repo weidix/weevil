@@ -11,8 +11,8 @@ use tracing::info;
 
 use crate::dir_mode;
 use crate::errors::AppError;
-use crate::file_mode;
-use crate::mode_params::FileModeParams;
+use crate::fetch_runtime;
+use crate::mode_params::{FetchModeParams, FileModeParams};
 
 const STABLE_WINDOW: Duration = Duration::from_secs(3);
 const CHECK_TICK: Duration = Duration::from_secs(1);
@@ -43,8 +43,11 @@ impl PendingFile {
 pub(crate) fn run_watch_mode(
     input: &Path,
     params: &FileModeParams,
+    fetch: &FetchModeParams,
     max_depth: i32,
 ) -> Result<(), AppError> {
+    fetch_runtime::preflight_script(fetch, params.script())?;
+
     let mut seen = dir_mode::scan_video_files(input, max_depth)?
         .into_iter()
         .collect::<HashSet<_>>();
@@ -79,7 +82,7 @@ pub(crate) fn run_watch_mode(
         seen.retain(|path| path.exists());
         pending.retain(|path, _| path.exists());
 
-        process_ready_files(&mut seen, &mut pending, params);
+        process_ready_files(&mut seen, &mut pending, params, fetch)?;
     }
 }
 
@@ -87,9 +90,40 @@ fn process_ready_files(
     seen: &mut HashSet<PathBuf>,
     pending: &mut HashMap<PathBuf, PendingFile>,
     params: &FileModeParams,
-) {
+    fetch: &FetchModeParams,
+) -> Result<(), AppError> {
+    let ready = collect_ready_files(seen, pending);
+    if ready.is_empty() {
+        return Ok(());
+    }
+
+    let now = Instant::now();
+    let results = fetch_runtime::run_batch_fetch_with_results(ready, params, fetch)?;
+    for (path, result) in results {
+        match result {
+            Ok(()) => {
+                info!("watch processed file: {:?}", path);
+                seen.insert(path.clone());
+                pending.remove(&path);
+            }
+            Err(err) => {
+                info!("watch failed for {:?}: {}", path, err);
+                if let Some(retry_state) = pending.get_mut(&path) {
+                    retry_state.next_retry_at = now + FAILURE_BACKOFF;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn collect_ready_files(
+    seen: &HashSet<PathBuf>,
+    pending: &mut HashMap<PathBuf, PendingFile>,
+) -> Vec<PathBuf> {
     let now = Instant::now();
     let paths = pending.keys().cloned().collect::<Vec<_>>();
+    let mut ready_files = Vec::new();
 
     for path in paths {
         if seen.contains(&path) {
@@ -131,20 +165,10 @@ fn process_ready_files(
             continue;
         }
 
-        match file_mode::run_file_mode(&path, params) {
-            Ok(()) => {
-                info!("watch processed file: {:?}", path);
-                seen.insert(path.clone());
-                pending.remove(&path);
-            }
-            Err(err) => {
-                info!("watch failed for {:?}: {}", path, err);
-                if let Some(retry_state) = pending.get_mut(&path) {
-                    retry_state.next_retry_at = now + FAILURE_BACKOFF;
-                }
-            }
-        }
+        ready_files.push(path);
     }
+
+    ready_files
 }
 
 fn handle_event(

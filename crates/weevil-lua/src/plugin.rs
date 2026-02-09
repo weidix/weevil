@@ -119,6 +119,22 @@ pub fn check_script(script: &str) -> Result<LuaPluginSpec, LuaPluginError> {
     LuaPlugin::check(script)
 }
 
+pub fn script_uses_only_async_http(script: &str) -> Result<bool, LuaPluginError> {
+    let _ = LuaPlugin::check(script)?;
+    let uses_blocking_http =
+        script.contains("weevil.http.get(") || script.contains("weevil.http.post(");
+    Ok(!uses_blocking_http)
+}
+
+pub fn script_uses_only_async_http_file(path: impl AsRef<Path>) -> Result<bool, LuaPluginError> {
+    let path = path.as_ref();
+    let contents = fs::read_to_string(path).map_err(|err| LuaPluginError::ScriptIo {
+        path: path.to_path_buf(),
+        source: err,
+    })?;
+    script_uses_only_async_http(&contents)
+}
+
 fn eval_script_table(lua: &Lua, script: &str) -> Result<mlua::Table, LuaPluginError> {
     let value: Value = lua.load(script).eval()?;
     match value {

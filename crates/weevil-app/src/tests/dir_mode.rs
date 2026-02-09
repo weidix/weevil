@@ -2,6 +2,7 @@ use std::fs;
 use std::path::Path;
 
 use super::*;
+use crate::mode_params::FetchModeParams;
 
 fn touch(path: &Path) {
     if let Some(parent) = path.parent() {
@@ -49,4 +50,16 @@ fn normalize_max_depth_accepts_unlimited() {
 fn normalize_max_depth_rejects_too_negative() {
     let err = normalize_max_depth(-2).expect_err("expected error");
     assert!(matches!(err, AppError::MaxDepthInvalid { depth: -2 }));
+}
+
+#[test]
+fn fetch_mode_detects_multithread() {
+    let serial = FetchModeParams::new(1, false, 1000);
+    assert!(!serial.multithread_enabled());
+
+    let parallel = FetchModeParams::new(3, false, 1000);
+    assert!(parallel.multithread_enabled());
+
+    let unlimited = FetchModeParams::new(0, true, 1000);
+    assert!(unlimited.multithread_enabled());
 }

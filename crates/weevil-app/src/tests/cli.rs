@@ -112,6 +112,9 @@ fn parse_dir_mode() {
         input_name_rules,
         folder_multi,
         max_depth,
+        fetch_threads,
+        throttle_same_script,
+        script_throttle_base_ms,
     } = cli.command
     {
         assert_eq!(input, Some(PathBuf::from("videos")));
@@ -120,6 +123,9 @@ fn parse_dir_mode() {
         assert_eq!(input_name_rules, vec!["regex:\\[[^\\]]+\\]"]);
         assert_eq!(folder_multi, Some(FolderMultiStrategy::SoftLink));
         assert_eq!(max_depth, Some(2));
+        assert_eq!(fetch_threads, None);
+        assert_eq!(throttle_same_script, None);
+        assert_eq!(script_throttle_base_ms, None);
     } else {
         panic!("expected dir command");
     }
@@ -138,13 +144,52 @@ fn parse_watch_mode() {
     .expect("expected command");
 
     if let Command::Watch {
-        input, max_depth, ..
+        input,
+        max_depth,
+        fetch_threads,
+        throttle_same_script,
+        script_throttle_base_ms,
+        ..
     } = cli.command
     {
         assert_eq!(input, Some(PathBuf::from("incoming")));
         assert_eq!(max_depth, Some(-1));
+        assert_eq!(fetch_threads, None);
+        assert_eq!(throttle_same_script, None);
+        assert_eq!(script_throttle_base_ms, None);
     } else {
         panic!("expected watch command");
+    }
+}
+
+#[test]
+fn parse_dir_multithread_options() {
+    let cli = Cli::try_parse_from([
+        "weevil",
+        "dir",
+        "--input",
+        "videos",
+        "--fetch-threads",
+        "0",
+        "--throttle-same-script",
+        "true",
+        "--script-throttle-base-ms",
+        "1600",
+    ])
+    .expect("expected command");
+
+    if let Command::Dir {
+        fetch_threads,
+        throttle_same_script,
+        script_throttle_base_ms,
+        ..
+    } = cli.command
+    {
+        assert_eq!(fetch_threads, Some(0));
+        assert_eq!(throttle_same_script, Some(true));
+        assert_eq!(script_throttle_base_ms, Some(1600));
+    } else {
+        panic!("expected dir command");
     }
 }
 

@@ -81,7 +81,7 @@ pub(crate) enum Command {
     #[command(
         name = "dir",
         about = "Generate NFO output for each video file in a directory.",
-        after_help = "Required effective fields:\n  input, script, output\n\nField priority (high -> low):\n  --input/--script/--output/--input-name-rule/--folder-multi/--max-depth\n  > [dir]\n  > [shared]"
+        after_help = "Required effective fields:\n  input, script, output\n\nField priority (high -> low):\n  --input/--script/--output/--input-name-rule/--folder-multi/--max-depth/--fetch-threads/--throttle-same-script/--script-throttle-base-ms\n  > [dir]\n  > [shared]"
     )]
     Dir {
         #[arg(long, short = 'i', value_name = "DIR")]
@@ -115,11 +115,29 @@ pub(crate) enum Command {
             help = "Maximum traversal depth; -1 means unlimited."
         )]
         max_depth: Option<i32>,
+        #[arg(
+            long,
+            value_name = "COUNT",
+            help = "Max concurrent tasks: 1=serial, >1=limited parallelism, 0=unlimited."
+        )]
+        fetch_threads: Option<u32>,
+        #[arg(
+            long,
+            value_name = "BOOL",
+            help = "Whether to throttle same-script execution across different tasks."
+        )]
+        throttle_same_script: Option<bool>,
+        #[arg(
+            long,
+            value_name = "MILLISECONDS",
+            help = "Base delay in milliseconds for same-script throttle random wait."
+        )]
+        script_throttle_base_ms: Option<u64>,
     },
     #[command(
         name = "watch",
         about = "Watch a directory continuously and process newly completed video files.",
-        after_help = "Required effective fields:\n  input, script, output\n\nField priority (high -> low):\n  --input/--script/--output/--input-name-rule/--folder-multi/--max-depth\n  > [watch]\n  > [shared]"
+        after_help = "Required effective fields:\n  input, script, output\n\nField priority (high -> low):\n  --input/--script/--output/--input-name-rule/--folder-multi/--max-depth/--fetch-threads/--throttle-same-script/--script-throttle-base-ms\n  > [watch]\n  > [shared]"
     )]
     Watch {
         #[arg(long, short = 'i', value_name = "DIR")]
@@ -153,6 +171,24 @@ pub(crate) enum Command {
             help = "Maximum traversal depth; -1 means unlimited."
         )]
         max_depth: Option<i32>,
+        #[arg(
+            long,
+            value_name = "COUNT",
+            help = "Max concurrent tasks: 1=serial, >1=limited parallelism, 0=unlimited."
+        )]
+        fetch_threads: Option<u32>,
+        #[arg(
+            long,
+            value_name = "BOOL",
+            help = "Whether to throttle same-script execution across different tasks."
+        )]
+        throttle_same_script: Option<bool>,
+        #[arg(
+            long,
+            value_name = "MILLISECONDS",
+            help = "Base delay in milliseconds for same-script throttle random wait."
+        )]
+        script_throttle_base_ms: Option<u64>,
     },
 }
 

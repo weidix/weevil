@@ -13,7 +13,7 @@ use crate::config::{
 use crate::dir_mode;
 use crate::errors::AppError;
 use crate::file_mode;
-use crate::mode_params::{FileModeParams, MultiFolderStrategy};
+use crate::mode_params::{FetchModeParams, FileModeParams, MultiFolderStrategy};
 use crate::nfo;
 use crate::watch_mode;
 
@@ -41,6 +41,9 @@ pub(crate) fn run() -> Result<(), AppError> {
                 output,
                 input_name_rules,
                 folder_multi,
+                fetch_threads: None,
+                throttle_same_script: None,
+                script_throttle_base_ms: None,
             })?;
             let params = file_mode_params_from_config(resolved);
             file_mode::run_file_mode(&input, &params)
@@ -52,6 +55,9 @@ pub(crate) fn run() -> Result<(), AppError> {
             input_name_rules,
             folder_multi,
             max_depth,
+            fetch_threads,
+            throttle_same_script,
+            script_throttle_base_ms,
         } => {
             let resolved = config.resolve_dir_mode_with(&DirCliOverrides {
                 input,
@@ -60,11 +66,16 @@ pub(crate) fn run() -> Result<(), AppError> {
                     output,
                     input_name_rules,
                     folder_multi,
+                    fetch_threads,
+                    throttle_same_script,
+                    script_throttle_base_ms,
                 },
                 max_depth,
             })?;
-            let params = file_mode_params_from_config(resolved.mode);
-            dir_mode::run_dir_mode(&resolved.input, &params, resolved.max_depth)
+            let mode = resolved.mode;
+            let params = file_mode_params_from_config(mode.clone());
+            let fetch = fetch_mode_params_from_config(mode);
+            dir_mode::run_dir_mode(&resolved.input, &params, &fetch, resolved.max_depth)
         }
         Command::Watch {
             input,
@@ -73,6 +84,9 @@ pub(crate) fn run() -> Result<(), AppError> {
             input_name_rules,
             folder_multi,
             max_depth,
+            fetch_threads,
+            throttle_same_script,
+            script_throttle_base_ms,
         } => {
             let resolved = config.resolve_watch_mode_with(&DirCliOverrides {
                 input,
@@ -81,11 +95,16 @@ pub(crate) fn run() -> Result<(), AppError> {
                     output,
                     input_name_rules,
                     folder_multi,
+                    fetch_threads,
+                    throttle_same_script,
+                    script_throttle_base_ms,
                 },
                 max_depth,
             })?;
-            let params = file_mode_params_from_config(resolved.mode);
-            watch_mode::run_watch_mode(&resolved.input, &params, resolved.max_depth)
+            let mode = resolved.mode;
+            let params = file_mode_params_from_config(mode.clone());
+            let fetch = fetch_mode_params_from_config(mode);
+            watch_mode::run_watch_mode(&resolved.input, &params, &fetch, resolved.max_depth)
         }
     }
 }
@@ -97,6 +116,37 @@ fn file_mode_params_from_config(resolved: ResolvedModeConfig) -> FileModeParams 
         resolved.input_name_rules,
         map_folder_multi(resolved.folder_multi),
     )
+}
+
+fn fetch_mode_params_from_config(resolved: ResolvedModeConfig) -> FetchModeParams {
+    FetchModeParams::new(
+        resolved.fetch_threads,
+        resolved.throttle_same_script,
+        resolved.script_throttle_base_ms,
+    )
+}
+
+#[cfg(test)]
+mod config_mapping_tests {
+    use super::*;
+
+    #[test]
+    fn fetch_mode_mapping_from_resolved_config() {
+        let resolved = ResolvedModeConfig {
+            script: "demo.lua".into(),
+            output: "out/{title}".to_string(),
+            input_name_rules: vec![],
+            folder_multi: FolderMultiStrategy::First,
+            fetch_threads: 0,
+            throttle_same_script: true,
+            script_throttle_base_ms: 1400,
+        };
+        let fetch = fetch_mode_params_from_config(resolved);
+        assert_eq!(fetch.fetch_threads(), 0);
+        assert!(fetch.throttle_same_script());
+        assert_eq!(fetch.script_throttle_base_ms(), 1400);
+        assert!(fetch.multithread_enabled());
+    }
 }
 
 fn map_folder_multi(strategy: FolderMultiStrategy) -> MultiFolderStrategy {

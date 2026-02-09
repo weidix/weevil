@@ -116,6 +116,12 @@ pub(crate) enum AppError {
     ImageHttpNotAllowed {
         url: String,
     },
+    FetchRuntime {
+        reason: String,
+    },
+    ScriptSyncHttpNotAllowed {
+        path: PathBuf,
+    },
 }
 
 impl AppError {
@@ -267,6 +273,15 @@ impl fmt::Display for AppError {
             }
             AppError::ImageHttpNotAllowed { url } => {
                 write!(f, "image URL must use HTTPS, HTTP is not allowed: {url}")
+            }
+            AppError::FetchRuntime { reason } => {
+                write!(f, "fetch runtime error: {reason}")
+            }
+            AppError::ScriptSyncHttpNotAllowed { path } => {
+                write!(
+                    f,
+                    "script {path:?} uses synchronous HTTP APIs; multi-thread mode requires weevil.http.get_async/post_async"
+                )
             }
         }
     }

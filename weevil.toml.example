@@ -12,6 +12,9 @@ input-name-rule = [
 ]
 folder-multi = "first" # first | hard-link | soft-link
 max-depth = -1
+fetch-threads = 1 # 1=serial, >1=parallel limit, 0=unlimited
+throttle-same-script = false # add ~1000ms random delay and prevent same-script overlap across tasks
+script-throttle-base-ms = 1000 # effective wait ~= base ±100ms
 
 [name]
 # name mode output file path (NFO)
@@ -24,7 +27,13 @@ output = "./output/name-mode.nfo"
 [dir]
 input = "./videos"
 # max-depth = 2
+# fetch-threads = 4
+# throttle-same-script = true
+# script-throttle-base-ms = 1200
 
 [watch]
 input = "./incoming"
 # max-depth = -1
+# fetch-threads = 4
+# throttle-same-script = true
+# script-throttle-base-ms = 1200
