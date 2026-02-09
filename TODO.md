@@ -6,7 +6,8 @@
 - [x] Output template rendering and multi-folder strategy (`first` / `hard-link` / `soft-link`).
 - [x] Video + subtitle organization (rename, move, language suffix matching).
 - [x] Directory batch processing and continuous watch (stability check + retry).
-- [ ] Support config-file options (e.g., output location, save thumbnails).
+- [ ] Support loading options from config file (e.g., output location).
+- [ ] Support saving images to local storage.
 - [ ] Support `tag` and other node-name mapping.
 
 ## weevil-lua
