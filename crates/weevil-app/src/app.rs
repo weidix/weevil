@@ -7,6 +7,9 @@ use serde::Serialize;
 use weevil_lua::LuaPlugin;
 
 use crate::cli::{Cli, Command, FolderMultiStrategy};
+use crate::config::{
+    AppConfig, DirCliOverrides, ModeCliOverrides, NameCliOverrides, ResolvedModeConfig,
+};
 use crate::dir_mode;
 use crate::errors::AppError;
 use crate::file_mode;
@@ -16,12 +19,16 @@ use crate::watch_mode;
 
 pub(crate) fn run() -> Result<(), AppError> {
     let cli = Cli::try_parse().map_err(AppError::Cli)?;
+    let config = AppConfig::load(cli.config.as_deref())?;
     match cli.command {
         Command::Name {
             name,
             script,
             output,
-        } => run_lua_nfo(&name, &script, &output),
+        } => {
+            let resolved = config.resolve_name_with(&NameCliOverrides { script, output })?;
+            run_lua_nfo(&name, &resolved.script, &resolved.output)
+        }
         Command::File {
             input,
             script,
@@ -29,12 +36,13 @@ pub(crate) fn run() -> Result<(), AppError> {
             input_name_rules,
             folder_multi,
         } => {
-            let params = FileModeParams::new(
+            let resolved = config.resolve_file_mode_with(&ModeCliOverrides {
                 script,
                 output,
                 input_name_rules,
-                map_folder_multi(folder_multi),
-            );
+                folder_multi,
+            })?;
+            let params = file_mode_params_from_config(resolved);
             file_mode::run_file_mode(&input, &params)
         }
         Command::Dir {
@@ -45,13 +53,18 @@ pub(crate) fn run() -> Result<(), AppError> {
             folder_multi,
             max_depth,
         } => {
-            let params = FileModeParams::new(
-                script,
-                output,
-                input_name_rules,
-                map_folder_multi(folder_multi),
-            );
-            dir_mode::run_dir_mode(&input, &params, max_depth)
+            let resolved = config.resolve_dir_mode_with(&DirCliOverrides {
+                input,
+                mode: ModeCliOverrides {
+                    script,
+                    output,
+                    input_name_rules,
+                    folder_multi,
+                },
+                max_depth,
+            })?;
+            let params = file_mode_params_from_config(resolved.mode);
+            dir_mode::run_dir_mode(&resolved.input, &params, resolved.max_depth)
         }
         Command::Watch {
             input,
@@ -61,15 +74,29 @@ pub(crate) fn run() -> Result<(), AppError> {
             folder_multi,
             max_depth,
         } => {
-            let params = FileModeParams::new(
-                script,
-                output,
-                input_name_rules,
-                map_folder_multi(folder_multi),
-            );
-            watch_mode::run_watch_mode(&input, &params, max_depth)
+            let resolved = config.resolve_watch_mode_with(&DirCliOverrides {
+                input,
+                mode: ModeCliOverrides {
+                    script,
+                    output,
+                    input_name_rules,
+                    folder_multi,
+                },
+                max_depth,
+            })?;
+            let params = file_mode_params_from_config(resolved.mode);
+            watch_mode::run_watch_mode(&resolved.input, &params, resolved.max_depth)
         }
     }
+}
+
+fn file_mode_params_from_config(resolved: ResolvedModeConfig) -> FileModeParams {
+    FileModeParams::new(
+        resolved.script,
+        resolved.output,
+        resolved.input_name_rules,
+        map_folder_multi(resolved.folder_multi),
+    )
 }
 
 fn map_folder_multi(strategy: FolderMultiStrategy) -> MultiFolderStrategy {

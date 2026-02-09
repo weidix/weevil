@@ -1,0 +1,30 @@
+# Weevil configuration example
+# Priority: CLI args > mode section > shared section
+
+[shared]
+# Reusable defaults for all modes
+script = "scripts/source_primary.lua"
+output = "./library/{title}"
+input-name-rule = [
+  "1080p,WEB-DL",
+  "regex:\\[[^\\]]+\\]",
+  "replace:_=> "
+]
+folder-multi = "first" # first | hard-link | soft-link
+max-depth = -1
+
+[name]
+# name mode output file path (NFO)
+output = "./output/name-mode.nfo"
+
+[file]
+# file mode-specific overrides (optional)
+# folder-multi = "hard-link"
+
+[dir]
+input = "./videos"
+# max-depth = 2
+
+[watch]
+input = "./incoming"
+# max-depth = -1

@@ -101,6 +101,18 @@ pub(crate) enum AppError {
     MaxDepthInvalid {
         depth: i32,
     },
+    ConfigRead {
+        path: PathBuf,
+        source: std::io::Error,
+    },
+    ConfigParse {
+        path: PathBuf,
+        source: toml::de::Error,
+    },
+    ConfigMissingField {
+        mode: &'static str,
+        field: &'static str,
+    },
 }
 
 impl AppError {
@@ -236,6 +248,18 @@ impl fmt::Display for AppError {
                 write!(
                     f,
                     "max depth {depth} is invalid; use -1 for unlimited or a non-negative value"
+                )
+            }
+            AppError::ConfigRead { path, source } => {
+                write!(f, "failed to read config file {path:?}: {source}")
+            }
+            AppError::ConfigParse { path, source } => {
+                write!(f, "failed to parse config file {path:?}: {source}")
+            }
+            AppError::ConfigMissingField { mode, field } => {
+                write!(
+                    f,
+                    "missing required config field for mode {mode:?}: {field:?}"
                 )
             }
         }

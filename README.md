@@ -66,9 +66,9 @@ return {
 - `name`: `run(name)`
 - `file` / `dir` / `watch`: `run(input_name, input_path)`
 
-`input_name` is the file stem after applying `--input-name-rule` rules.
+`input_name` is the file stem after applying configured `input-name-rule` rules.
 
-`--input-name-rule` supports both legacy and rule-based syntax:
+`input-name-rule` supports both legacy and rule-based syntax:
 
 - Legacy rule token: `1080p` (or `1080p,WEB-DL` in one argument).
 - Literal remove: `literal:UNCUT`.
@@ -76,7 +76,7 @@ return {
 - Literal replace: `replace:_=> `.
 - Regex replace: `regex-replace:\\s+=> `.
 
-Rules are applied in order and can be repeated with multiple `--input-name-rule` flags.
+Rules are applied in order and can be configured as a single string or a string array.
 
 ### `run` return value
 
@@ -88,6 +88,66 @@ Reference schema type: `crates/weevil-app/src/nfo.rs`.
 
 ## CLI Modes
 
+## Config-File Option Policy
+
+CLI and config can be used together. Precedence is:
+
+- **CLI args > mode config > shared config**
+
+In other words, for the same field:
+
+- CLI flag wins immediately
+- if CLI flag is missing, use mode section (`[name]` / `[file]` / `[dir]` / `[watch]`)
+- if mode section is missing, fallback to `[shared]`
+
+CLI supports full options for each mode; config provides reusable defaults.
+
+Reusable defaults live in config (`weevil.toml`):
+
+- Shared defaults: `script`, `output`, `input-name-rule`, `folder-multi`, `max-depth`
+- Mode defaults:
+  - `[name]`: `script`, `output`
+  - `[file]`: `script`, `output`, `input-name-rule`, `folder-multi`
+  - `[dir]`: `input`, `script`, `output`, `input-name-rule`, `folder-multi`, `max-depth`
+  - `[watch]`: `input`, `script`, `output`, `input-name-rule`, `folder-multi`, `max-depth`
+
+Config loading order:
+
+- `--config <FILE>` if provided
+- otherwise `./weevil.toml` if present
+- otherwise empty config (then required fields must still be satisfiable)
+
+Example `weevil.toml`:
+
+```toml
+[shared]
+script = "demo_lua/source_alpha/lua/source_alpha.lua"
+output = "./library/{title}"
+input-name-rule = ["1080p,WEB-DL", "regex:\\[[^\\]]+\\]", "replace:_=> "]
+folder-multi = "first"
+max-depth = -1
+
+[name]
+output = "./sample.nfo"
+
+[file]
+folder-multi = "first"
+
+[dir]
+input = "./videos"
+
+[watch]
+input = "./incoming"
+```
+
+Quick mixed usage example (CLI overrides only one field):
+
+```bash
+# script/output/input come from config
+# but this run overrides max-depth to 1
+cargo run -p weevil-app -- dir --max-depth 1
+```
+
 ### 1) `name`
 
 Generate one NFO by title string.
@@ -97,6 +157,12 @@ cargo run -p weevil-app -- name \
   --name "sample title" \
   --script demo_lua/source_alpha/lua/source_alpha.lua \
   --output ./sample.nfo
+```
+
+Or provide a custom config file:
+
+```bash
+cargo run -p weevil-app -- --config ./weevil.toml name --name "sample title"
 ```
 
 ### 2) `file`
@@ -126,7 +192,7 @@ cargo run -p weevil-app -- dir \
   --max-depth 2
 ```
 
-`--max-depth -1` means unlimited traversal.
+`max-depth = -1` in config means unlimited traversal.
 
 ### 4) `watch`
 
@@ -146,9 +212,9 @@ Watch behavior today:
 - Waits for file size stability and lock availability before processing.
 - Retries failed items with backoff.
 
-## Output Template Rules (`--output`)
+## Output Template Rules (`output` in config)
 
-`--output` is a path template **without extension**.
+`output` is a path template **without extension**.
 
 ### Supported fields
 
@@ -171,7 +237,7 @@ Watch behavior today:
 ### Expansion behavior
 
 - List and actor fields can expand to multiple output paths (cartesian expansion where applicable).
-- `--folder-multi` controls extra paths:
+- `folder-multi` controls extra paths:
   - `first`: keep only first path.
   - `hard-link`: keep first as real files, link extras via hard links.
   - `soft-link`: keep first as real files, link extras via symlinks.

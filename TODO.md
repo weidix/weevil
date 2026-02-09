@@ -6,7 +6,7 @@
 - [x] Output template rendering and multi-folder strategy (`first` / `hard-link` / `soft-link`).
 - [x] Video + subtitle organization (rename, move, language suffix matching).
 - [x] Directory batch processing and continuous watch (stability check + retry).
-- [ ] Support config-file option policy: keep invocation-unique args in CLI (e.g., `name --name`, `file --input` for file path), and persist reusable defaults in config (e.g., `dir/watch --input` for directory, plus shared `--script` / `--output` / `--input-name-rule` / `--folder-multi` / `--max-depth`).
+- [x] Support config-file option policy: keep invocation-unique args in CLI (e.g., `name --name`, `file --input` for file path), and persist reusable defaults in config (e.g., `dir/watch --input` for directory, plus shared `--script` / `--output` / `--input-name-rule` / `--folder-multi` / `--max-depth`).
 - [ ] Support saving images to local storage.
 - [ ] Support multi-threaded fetching.
 - [ ] Support multi-source data aggregation.

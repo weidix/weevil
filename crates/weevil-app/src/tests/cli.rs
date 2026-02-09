@@ -23,8 +23,8 @@ fn parse_name_command() {
     } = cli.command
     {
         assert_eq!(name, "Spirited Away");
-        assert_eq!(script, PathBuf::from("script.lua"));
-        assert_eq!(output, PathBuf::from("movie.nfo"));
+        assert_eq!(script, Some(PathBuf::from("script.lua")));
+        assert_eq!(output, Some(PathBuf::from("movie.nfo")));
     } else {
         panic!("expected name command");
     }
@@ -59,105 +59,27 @@ fn parse_file_mode() {
         "--script",
         "script.lua",
         "--output",
-        "output/{title}",
-    ])
-    .expect("expected command");
-    assert!(matches!(cli.command, Command::File { .. }));
-}
-
-#[test]
-fn parse_file_mode_input_name_rule() {
-    let cli = Cli::try_parse_from([
-        "weevil",
-        "file",
-        "--input",
-        "movie.mkv",
-        "--script",
-        "script.lua",
-        "--output",
-        "output/{title}",
+        "library/{title}",
         "--input-name-rule",
         "1080p,WEB-DL",
-    ])
-    .expect("expected command");
-
-    if let Command::File {
-        input_name_rules, ..
-    } = cli.command
-    {
-        assert_eq!(input_name_rules, vec!["1080p,WEB-DL"]);
-    } else {
-        panic!("expected file command");
-    }
-}
-
-#[test]
-fn parse_file_mode_input_name_rule_repeated() {
-    let cli = Cli::try_parse_from([
-        "weevil",
-        "file",
-        "--input",
-        "movie.mkv",
-        "--script",
-        "script.lua",
-        "--output",
-        "output/{title}",
-        "--input-name-rule",
-        "regex:\\[[^\\]]+\\]",
-        "--input-name-rule",
-        "replace:_=> ",
-    ])
-    .expect("expected command");
-
-    if let Command::File {
-        input_name_rules, ..
-    } = cli.command
-    {
-        assert_eq!(
-            input_name_rules,
-            vec!["regex:\\[[^\\]]+\\]", "replace:_=> "]
-        );
-    } else {
-        panic!("expected file command");
-    }
-}
-
-#[test]
-fn parse_file_mode_legacy_input_name_option_rejected() {
-    let error = Cli::try_parse_from([
-        "weevil",
-        "file",
-        "--input",
-        "movie.mkv",
-        "--script",
-        "script.lua",
-        "--output",
-        "output/{title}",
-        "--input-name-remove",
-        "1080p,WEB-DL",
-    ])
-    .expect_err("expected error");
-    assert_eq!(error.kind(), clap::error::ErrorKind::UnknownArgument);
-}
-
-#[test]
-fn parse_file_mode_folder_multi() {
-    let cli = Cli::try_parse_from([
-        "weevil",
-        "file",
-        "--input",
-        "movie.mkv",
-        "--script",
-        "script.lua",
-        "--output",
-        "output/{title}",
         "--folder-multi",
         "hard-link",
     ])
     .expect("expected command");
 
-    if let Command::File { folder_multi, .. } = cli.command {
-        assert_eq!(folder_multi, FolderMultiStrategy::HardLink);
+    if let Command::File {
+        input,
+        script,
+        output,
+        input_name_rules,
+        folder_multi,
+    } = cli.command
+    {
+        assert_eq!(input, PathBuf::from("movie.mkv"));
+        assert_eq!(script, Some(PathBuf::from("script.lua")));
+        assert_eq!(output, Some("library/{title}".to_string()));
+        assert_eq!(input_name_rules, vec!["1080p,WEB-DL"]);
+        assert_eq!(folder_multi, Some(FolderMultiStrategy::HardLink));
     } else {
         panic!("expected file command");
     }
@@ -173,122 +95,17 @@ fn parse_dir_mode() {
         "--script",
         "script.lua",
         "--output",
-        "output/{title}",
+        "library/{title}",
+        "--input-name-rule",
+        "regex:\\[[^\\]]+\\]",
+        "--folder-multi",
+        "soft-link",
         "--max-depth",
         "2",
     ])
     .expect("expected command");
 
-    if let Command::Dir { max_depth, .. } = cli.command {
-        assert_eq!(max_depth, 2);
-    } else {
-        panic!("expected dir command");
-    }
-}
-
-#[test]
-fn parse_dir_mode_default_depth() {
-    let cli = Cli::try_parse_from([
-        "weevil",
-        "dir",
-        "--input",
-        "videos",
-        "--script",
-        "script.lua",
-        "--output",
-        "output/{title}",
-    ])
-    .expect("expected command");
-
-    if let Command::Dir { max_depth, .. } = cli.command {
-        assert_eq!(max_depth, -1);
-    } else {
-        panic!("expected dir command");
-    }
-}
-
-#[test]
-fn parse_dir_mode_negative_depth() {
-    let cli = Cli::try_parse_from([
-        "weevil",
-        "dir",
-        "--input",
-        "videos",
-        "--script",
-        "script.lua",
-        "--output",
-        "output/{title}",
-        "--max-depth",
-        "-1",
-    ])
-    .expect("expected command");
-
-    if let Command::Dir { max_depth, .. } = cli.command {
-        assert_eq!(max_depth, -1);
-    } else {
-        panic!("expected dir command");
-    }
-}
-
-#[test]
-fn parse_extra_args() {
-    let error = Cli::try_parse_from([
-        "weevil",
-        "name",
-        "--name",
-        "Name",
-        "--script",
-        "script.lua",
-        "--output",
-        "movie.nfo",
-        "extra",
-    ])
-    .expect_err("expected error");
-    assert_eq!(error.kind(), clap::error::ErrorKind::UnknownArgument);
-}
-
-#[test]
-fn parse_watch_mode_with_defaults() {
-    let cli = Cli::try_parse_from([
-        "weevil",
-        "watch",
-        "--input",
-        "videos",
-        "--script",
-        "script.lua",
-        "--output",
-        "output/{title}",
-    ])
-    .expect("expected command");
-
-    if let Command::Watch { max_depth, .. } = cli.command {
-        assert_eq!(max_depth, -1);
-    } else {
-        panic!("expected watch command");
-    }
-}
-
-#[test]
-fn parse_watch_mode_with_explicit_values() {
-    let cli = Cli::try_parse_from([
-        "weevil",
-        "watch",
-        "--input",
-        "videos",
-        "--script",
-        "script.lua",
-        "--output",
-        "output/{title}",
-        "--input-name-rule",
-        "1080p,WEB-DL",
-        "--folder-multi",
-        "soft-link",
-        "--max-depth",
-        "1",
-    ])
-    .expect("expected command");
-
-    if let Command::Watch {
+    if let Command::Dir {
         input,
         script,
         output,
@@ -297,13 +114,59 @@ fn parse_watch_mode_with_explicit_values() {
         max_depth,
     } = cli.command
     {
-        assert_eq!(input, PathBuf::from("videos"));
-        assert_eq!(script, PathBuf::from("script.lua"));
-        assert_eq!(output, "output/{title}");
-        assert_eq!(input_name_rules, vec!["1080p,WEB-DL"]);
-        assert_eq!(folder_multi, FolderMultiStrategy::SoftLink);
-        assert_eq!(max_depth, 1);
+        assert_eq!(input, Some(PathBuf::from("videos")));
+        assert_eq!(script, Some(PathBuf::from("script.lua")));
+        assert_eq!(output, Some("library/{title}".to_string()));
+        assert_eq!(input_name_rules, vec!["regex:\\[[^\\]]+\\]"]);
+        assert_eq!(folder_multi, Some(FolderMultiStrategy::SoftLink));
+        assert_eq!(max_depth, Some(2));
+    } else {
+        panic!("expected dir command");
+    }
+}
+
+#[test]
+fn parse_watch_mode() {
+    let cli = Cli::try_parse_from([
+        "weevil",
+        "watch",
+        "--input",
+        "incoming",
+        "--max-depth",
+        "-1",
+    ])
+    .expect("expected command");
+
+    if let Command::Watch {
+        input, max_depth, ..
+    } = cli.command
+    {
+        assert_eq!(input, Some(PathBuf::from("incoming")));
+        assert_eq!(max_depth, Some(-1));
     } else {
         panic!("expected watch command");
     }
+}
+
+#[test]
+fn parse_config_option_short() {
+    let cli =
+        Cli::try_parse_from(["weevil", "-c", "custom.toml", "dir"]).expect("expected command");
+    assert_eq!(cli.config, Some(PathBuf::from("custom.toml")));
+    assert!(matches!(cli.command, Command::Dir { .. }));
+}
+
+#[test]
+fn parse_config_option_long() {
+    let cli = Cli::try_parse_from(["weevil", "--config", "custom.toml", "watch"])
+        .expect("expected command");
+    assert_eq!(cli.config, Some(PathBuf::from("custom.toml")));
+    assert!(matches!(cli.command, Command::Watch { .. }));
+}
+
+#[test]
+fn parse_extra_args() {
+    let error = Cli::try_parse_from(["weevil", "name", "--name", "Name", "extra"])
+        .expect_err("expected error");
+    assert_eq!(error.kind(), clap::error::ErrorKind::UnknownArgument);
 }

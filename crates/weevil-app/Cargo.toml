@@ -11,6 +11,7 @@ notify = "8"
 quick-xml = { version = "0.38", features = ["serialize"] }
 serde = { version = "1", features = ["derive"] }
 regex = "1"
+toml = "0.9"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 weevil-lua = { path = "../weevil-lua" }
