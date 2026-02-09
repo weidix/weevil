@@ -299,3 +299,20 @@ fn parse_extra_args() {
         .expect_err("expected error");
     assert_eq!(error.kind(), clap::error::ErrorKind::UnknownArgument);
 }
+
+#[test]
+fn parse_scripts_command() {
+    let cli = Cli::try_parse_from([
+        "weevil", "scripts", "--script", "a.lua", "--script", "b.lua",
+    ])
+    .expect("expected command");
+
+    if let Command::Scripts { scripts } = cli.command {
+        assert_eq!(
+            scripts,
+            vec![PathBuf::from("a.lua"), PathBuf::from("b.lua")]
+        );
+    } else {
+        panic!("expected scripts command");
+    }
+}

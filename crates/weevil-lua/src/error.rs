@@ -10,6 +10,14 @@ pub enum LuaPluginError {
     ScriptReturnMissing,
     #[error("script returned {kind}, expected a table")]
     ScriptReturnNotTable { kind: String },
+    #[error("script table is missing alias")]
+    MissingAlias,
+    #[error("alias must be a string, got {kind}")]
+    InvalidAliasType { kind: String },
+    #[error("alias is not valid UTF-8")]
+    AliasNotUtf8,
+    #[error("alias cannot be empty")]
+    EmptyAlias,
     #[error("script table is missing trusted_urls")]
     MissingTrustedUrls,
     #[error("trusted_urls must be an array of strings, got {kind}")]

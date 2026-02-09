@@ -3,7 +3,7 @@ use std::fmt;
 use std::sync::{Arc, Mutex, Once, OnceLock};
 
 use tracing_subscriber::prelude::*;
-use weevil_lua::{LuaPlugin, check_script, script_uses_only_async_http};
+use weevil_lua::{LuaPlugin, check_script, script_alias, script_uses_only_async_http};
 
 struct FieldLayer {
     records: Arc<Mutex<Vec<HashMap<String, String>>>>,
@@ -92,9 +92,31 @@ fn check_requires_return_value() {
 
 #[test]
 fn check_requires_trusted_urls() {
-    let script = "return { run = function() return nil end }";
+    let script = "return { alias = \"demo.alias\", run = function() return nil end }";
     let err = check_script(script).expect_err("should fail");
     assert!(err.to_string().contains("trusted_urls"));
+}
+
+#[test]
+fn check_requires_alias() {
+    let script = "return { trusted_urls = {}, run = function() return nil end }";
+    let err = check_script(script).expect_err("should fail");
+    assert!(err.to_string().contains("missing alias"));
+}
+
+#[test]
+fn check_rejects_empty_alias() {
+    let script = "return { alias = \"   \", trusted_urls = {}, run = function() return nil end }";
+    let err = check_script(script).expect_err("should fail");
+    assert!(err.to_string().contains("alias cannot be empty"));
+}
+
+#[test]
+fn script_alias_reads_alias_value() {
+    let script =
+        "return { alias = \"provider.demo\", trusted_urls = {}, run = function() return nil end }";
+    let alias = script_alias(script).expect("alias");
+    assert_eq!(alias, "provider.demo");
 }
 
 #[test]
@@ -108,6 +130,7 @@ fn check_rejects_non_table_return() {
 fn lua_can_use_core_features() {
     let script = r#"
 return {
+  alias = "test.alias",
   trusted_urls = {},
   run = function()
     local tree = weevil.html.parse("<div id='hero'><span class='title'>Hello</span></div>")
@@ -134,6 +157,7 @@ fn lua_logs_include_task_context() {
     drain_logs();
     let script = r#"
 return {
+  alias = "test.alias",
   trusted_urls = {},
   run = function()
     weevil.log.info("start", 1)
@@ -167,6 +191,7 @@ return {
 fn http_blocks_untrusted_urls() {
     let script = r#"
 return {
+  alias = "test.alias",
   trusted_urls = { "https://allowed.example/" },
   run = function()
     return weevil.http.get("https://blocked.example/")
@@ -182,6 +207,7 @@ return {
 fn http_post_blocks_untrusted_urls() {
     let script = r#"
 return {
+  alias = "test.alias",
   trusted_urls = { "https://allowed.example/" },
   run = function()
     return weevil.http.post("https://blocked.example/", "{}")
@@ -197,6 +223,7 @@ return {
 fn http_rejects_non_string_header_name() {
     let script = r#"
 return {
+  alias = "test.alias",
   trusted_urls = { "https://example.com/" },
   run = function()
     return weevil.http.get("https://example.com/", { headers = { [1] = "value" } })
@@ -215,6 +242,7 @@ return {
 fn http_post_rejects_non_string_header_name() {
     let script = r#"
 return {
+  alias = "test.alias",
   trusted_urls = { "https://example.com/" },
   run = function()
     return weevil.http.post("https://example.com/", "{}", { headers = { [1] = "value" } })
@@ -233,6 +261,7 @@ return {
 fn http_rejects_non_string_header_value() {
     let script = r#"
 return {
+  alias = "test.alias",
   trusted_urls = { "https://example.com/" },
   run = function()
     return weevil.http.get("https://example.com/", { headers = { ["user-agent"] = 123 } })
@@ -251,6 +280,7 @@ return {
 fn http_rejects_non_string_version() {
     let script = r#"
 return {
+  alias = "test.alias",
   trusted_urls = { "https://example.com/" },
   run = function()
     return weevil.http.get("https://example.com/", { version = 2 })
@@ -266,6 +296,7 @@ return {
 fn http_post_rejects_non_string_version() {
     let script = r#"
 return {
+  alias = "test.alias",
   trusted_urls = { "https://example.com/" },
   run = function()
     return weevil.http.post("https://example.com/", "{}", { version = 2 })
@@ -281,6 +312,7 @@ return {
 fn http_rejects_unsupported_version() {
     let script = r#"
 return {
+  alias = "test.alias",
   trusted_urls = { "https://example.com/" },
   run = function()
     return weevil.http.get("https://example.com/", { version = "3" })
@@ -294,7 +326,7 @@ return {
 
 #[test]
 fn from_str_requires_run() {
-    let script = "return { trusted_urls = {} }";
+    let script = "return { alias = \"demo.alias\", trusted_urls = {} }";
     let err = LuaPlugin::from_str(script).err().expect("should fail");
     assert!(err.to_string().contains("run function"));
 }
@@ -303,6 +335,7 @@ fn from_str_requires_run() {
 fn run_can_return_none() {
     let script = r#"
 return {
+  alias = "test.alias",
   trusted_urls = {},
   run = function() return nil end
 }
@@ -316,6 +349,7 @@ return {
 fn json_encode_decode_roundtrip() {
     let script = r#"
 return {
+  alias = "test.alias",
   trusted_urls = {},
   run = function()
     local input = {
@@ -362,6 +396,7 @@ return {
 fn json_decode_preserves_null_in_arrays() {
     let script = r#"
 return {
+  alias = "test.alias",
   trusted_urls = {},
   run = function()
     local obj = weevil.json.decode('{"list":[1,2,null],"flag":false}')
@@ -394,6 +429,7 @@ return {
 fn json_encode_rejects_functions() {
     let script = r#"
 return {
+  alias = "test.alias",
   trusted_urls = {},
   run = function()
     return weevil.json.encode(function() end)
@@ -409,6 +445,7 @@ return {
 fn async_http_preflight_accepts_async_calls() {
     let script = r#"
 return {
+  alias = "test.alias",
   trusted_urls = { "https://example.com/" },
   run = function()
     return weevil.http.get_async("https://example.com/")
@@ -423,6 +460,7 @@ return {
 fn async_http_preflight_rejects_blocking_get() {
     let script = r#"
 return {
+  alias = "test.alias",
   trusted_urls = { "https://example.com/" },
   run = function()
     return weevil.http.get("https://example.com/")
@@ -437,6 +475,7 @@ return {
 fn async_http_preflight_rejects_blocking_post() {
     let script = r#"
 return {
+  alias = "test.alias",
   trusted_urls = { "https://example.com/" },
   run = function()
     return weevil.http.post("https://example.com/", "{}")

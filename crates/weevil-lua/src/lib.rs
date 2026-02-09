@@ -8,6 +8,6 @@ mod plugin;
 pub use crate::error::LuaPluginError;
 pub use crate::http::{HttpClient, HttpRequestOptions, TrustedUrl};
 pub use crate::plugin::{
-    LuaPlugin, LuaPluginSpec, check_script, script_uses_only_async_http,
-    script_uses_only_async_http_file,
+    LuaPlugin, LuaPluginSpec, check_script, dedupe_script_paths_by_alias, script_alias,
+    script_alias_file, script_uses_only_async_http, script_uses_only_async_http_file,
 };

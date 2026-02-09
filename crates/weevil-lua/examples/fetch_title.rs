@@ -3,6 +3,7 @@ use weevil_lua::LuaPlugin;
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let script = r#"
 return {
+  alias = "test.alias",
   trusted_urls = { "https://example.com/" },
   run = function()
     local page = weevil.http.get("https://example.com/")

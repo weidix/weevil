@@ -286,6 +286,28 @@ pub(crate) enum Command {
         )]
         multi_source_max_sources: Option<u32>,
     },
+    #[command(
+        name = "scripts",
+        about = "List Lua script metadata from CLI inputs or config defaults.",
+        after_help = "Usage:
+  weevil scripts --script a.lua --script b.lua
+  weevil --config weevil.toml scripts
+
+Resolution:
+  If --script is provided, list those scripts.
+  Otherwise, collect scripts from config defaults."
+    )]
+    Scripts {
+        #[arg(
+            long = "script",
+            short = 's',
+            value_name = "SCRIPT",
+            num_args = 1..,
+            action = clap::ArgAction::Append,
+            help = "Lua script path; can be repeated."
+        )]
+        scripts: Vec<PathBuf>,
+    },
 }
 
 #[cfg(test)]

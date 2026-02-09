@@ -122,6 +122,7 @@ pub(crate) enum AppError {
     ScriptSyncHttpNotAllowed {
         path: PathBuf,
     },
+    ScriptInfoNoScripts,
 }
 
 impl AppError {
@@ -282,6 +283,9 @@ impl fmt::Display for AppError {
                     f,
                     "script {path:?} uses synchronous HTTP APIs; multi-thread mode requires weevil.http.get_async/post_async"
                 )
+            }
+            AppError::ScriptInfoNoScripts => {
+                write!(f, "no scripts found from CLI or config")
             }
         }
     }

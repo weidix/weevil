@@ -490,3 +490,5 @@ fn resolve_max_depth(mode: &ModeConfig, shared: &SharedConfig, cli: Option<i32>)
 #[cfg(test)]
 #[path = "tests/config.rs"]
 mod tests;
+
+mod script_listing;

@@ -1,17 +1,21 @@
+use std::collections::HashSet;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use clap::Parser;
+use tracing::warn;
 
 use crate::cli::{Cli, Command, FolderMultiStrategy};
 use crate::config::{
     AppConfig, DirCliOverrides, ModeCliOverrides, NameCliOverrides, ResolvedModeConfig,
+    ResolvedNameConfig,
 };
 use crate::dir_mode;
 use crate::errors::AppError;
 use crate::file_mode;
 use crate::image_store::localize_movie_images;
 use crate::mode_params::{FetchModeParams, FileModeParams, MultiFolderStrategy};
+use crate::script_info;
 use crate::source_runner;
 use crate::watch_mode;
 
@@ -34,6 +38,7 @@ pub(crate) fn run() -> Result<(), AppError> {
                 save_images: flag_override(save_images),
                 multi_source_max_sources,
             })?;
+            let resolved = dedupe_resolved_name_script_aliases(resolved)?;
             run_lua_nfo(
                 &name,
                 &resolved.scripts,
@@ -65,6 +70,7 @@ pub(crate) fn run() -> Result<(), AppError> {
                 save_images: flag_override(save_images),
                 multi_source_max_sources,
             })?;
+            let resolved = dedupe_resolved_script_aliases(resolved)?;
             let params = file_mode_params_from_config(resolved);
             file_mode::run_file_mode(&input, &params)
         }
@@ -98,10 +104,12 @@ pub(crate) fn run() -> Result<(), AppError> {
                 },
                 max_depth,
             })?;
-            let mode = resolved.mode;
+            let input = resolved.input;
+            let max_depth = resolved.max_depth;
+            let mode = dedupe_resolved_script_aliases(resolved.mode)?;
             let params = file_mode_params_from_config(mode.clone());
             let fetch = fetch_mode_params_from_config(mode);
-            dir_mode::run_dir_mode(&resolved.input, &params, &fetch, resolved.max_depth)
+            dir_mode::run_dir_mode(&input, &params, &fetch, max_depth)
         }
         Command::Watch {
             input,
@@ -133,12 +141,53 @@ pub(crate) fn run() -> Result<(), AppError> {
                 },
                 max_depth,
             })?;
-            let mode = resolved.mode;
+            let input = resolved.input;
+            let max_depth = resolved.max_depth;
+            let mode = dedupe_resolved_script_aliases(resolved.mode)?;
             let params = file_mode_params_from_config(mode.clone());
             let fetch = fetch_mode_params_from_config(mode);
-            watch_mode::run_watch_mode(&resolved.input, &params, &fetch, resolved.max_depth)
+            watch_mode::run_watch_mode(&input, &params, &fetch, max_depth)
+        }
+        Command::Scripts { scripts } => {
+            let infos = script_info::list_script_infos(&config, scripts)?;
+            script_info::print_script_infos(&infos);
+            Ok(())
         }
     }
+}
+
+fn dedupe_resolved_script_aliases(
+    mut resolved: ResolvedModeConfig,
+) -> Result<ResolvedModeConfig, AppError> {
+    resolved.scripts = dedupe_script_aliases_with_warning(resolved.scripts)?;
+    Ok(resolved)
+}
+
+fn dedupe_resolved_name_script_aliases(
+    mut resolved: ResolvedNameConfig,
+) -> Result<ResolvedNameConfig, AppError> {
+    resolved.scripts = dedupe_script_aliases_with_warning(resolved.scripts)?;
+    Ok(resolved)
+}
+
+fn dedupe_script_aliases_with_warning(
+    scripts: Vec<std::path::PathBuf>,
+) -> Result<Vec<std::path::PathBuf>, AppError> {
+    let mut deduped = Vec::with_capacity(scripts.len());
+    let mut seen_aliases = HashSet::new();
+
+    for script in scripts {
+        let alias = weevil_lua::script_alias_file(&script).map_err(AppError::LuaPlugin)?;
+        if seen_aliases.insert(alias.clone()) {
+            deduped.push(script);
+            continue;
+        }
+        warn!(
+            "duplicate script alias detected: {alias}; keeping earliest script and ignoring later one"
+        );
+    }
+
+    Ok(deduped)
 }
 
 fn file_mode_params_from_config(resolved: ResolvedModeConfig) -> FileModeParams {
@@ -164,6 +213,8 @@ fn fetch_mode_params_from_config(resolved: ResolvedModeConfig) -> FetchModeParam
 #[cfg(test)]
 mod config_mapping_tests {
     use super::*;
+    use std::fs;
+    use tempfile::tempdir;
 
     #[test]
     fn fetch_mode_mapping_from_resolved_config() {
@@ -184,6 +235,81 @@ mod config_mapping_tests {
         assert!(fetch.throttle_same_script());
         assert_eq!(fetch.script_throttle_base_ms(), 1400);
         assert!(fetch.multithread_enabled());
+    }
+
+    #[test]
+    fn dedupe_resolved_script_aliases_keeps_earliest_alias() {
+        let dir = tempdir().expect("temp dir");
+        let first = dir.path().join("a.lua");
+        let second = dir.path().join("b.lua");
+        let third = dir.path().join("c.lua");
+
+        fs::write(
+            &first,
+            r#"return { alias = "source.a", trusted_urls = {}, run = function() return nil end }"#,
+        )
+        .expect("write first");
+        fs::write(
+            &second,
+            r#"return { alias = "source.b", trusted_urls = {}, run = function() return nil end }"#,
+        )
+        .expect("write second");
+        fs::write(
+            &third,
+            r#"return { alias = "source.a", trusted_urls = {}, run = function() return nil end }"#,
+        )
+        .expect("write third");
+
+        let resolved = ResolvedModeConfig {
+            scripts: vec![first.clone(), second.clone(), third],
+            output: "out/{title}".to_string(),
+            input_name_rules: vec![],
+            folder_multi: FolderMultiStrategy::First,
+            fetch_threads: 1,
+            throttle_same_script: false,
+            script_throttle_base_ms: 1000,
+            multi_source: false,
+            save_images: false,
+            multi_source_max_sources: 2,
+        };
+
+        let deduped = dedupe_resolved_script_aliases(resolved).expect("dedupe scripts");
+        assert_eq!(deduped.scripts, vec![first, second]);
+    }
+
+    #[test]
+    fn dedupe_resolved_name_script_aliases_keeps_earliest_alias() {
+        let dir = tempdir().expect("temp dir");
+        let first = dir.path().join("name-a.lua");
+        let second = dir.path().join("name-b.lua");
+        let third = dir.path().join("name-c.lua");
+
+        fs::write(
+            &first,
+            r#"return { alias = "name.a", trusted_urls = {}, run = function() return nil end }"#,
+        )
+        .expect("write first");
+        fs::write(
+            &second,
+            r#"return { alias = "name.b", trusted_urls = {}, run = function() return nil end }"#,
+        )
+        .expect("write second");
+        fs::write(
+            &third,
+            r#"return { alias = "name.a", trusted_urls = {}, run = function() return nil end }"#,
+        )
+        .expect("write third");
+
+        let resolved = ResolvedNameConfig {
+            scripts: vec![first.clone(), second.clone(), third],
+            output: dir.path().join("out.nfo"),
+            multi_source: false,
+            save_images: false,
+            multi_source_max_sources: 2,
+        };
+
+        let deduped = dedupe_resolved_name_script_aliases(resolved).expect("dedupe scripts");
+        assert_eq!(deduped.scripts, vec![first, second]);
     }
 }
 

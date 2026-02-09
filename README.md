@@ -48,6 +48,7 @@ A script must return a table:
 
 ```lua
 return {
+  alias = "source.example",
   trusted_urls = {
     "https://example.com/"
   },
@@ -60,6 +61,7 @@ return {
 
 ### Required fields
 
+- `alias`: required unique identifier for this script source.
 - `trusted_urls`: required (can be an empty array).
 - `run`: required function.
 
@@ -256,6 +258,27 @@ cargo run -p weevil-app -- watch \
 Watch behavior today:
 
 - Processes `Create`/`Modify`/`Remove` file events.
+
+### 5) `scripts`
+
+List script metadata (path, alias, trusted URL count, run availability, and duplicate-alias status).
+
+```bash
+# use explicit scripts from CLI
+cargo run -p weevil-app -- scripts \
+  --script ./scripts/a.lua \
+  --script ./scripts/b.lua
+
+# or load script paths from config
+cargo run -p weevil-app -- --config ./weevil.toml scripts
+```
+
+Behavior:
+
+- If `--script` is provided, list those scripts only.
+- Otherwise, collect script paths from config sections (`[shared]`, `[name]`, `[file]`, `[dir]`, `[watch]`).
+- Duplicate aliases are preserved in output but marked as `ignored-duplicate-alias` for later entries.
+- When a duplicate alias is detected, a warning log is emitted and only the earliest script remains active.
 - Waits for file size stability and lock availability before processing.
 - Retries failed items with backoff.
 
