@@ -6,8 +6,12 @@
 - [x] Output template rendering and multi-folder strategy (`first` / `hard-link` / `soft-link`).
 - [x] Video + subtitle organization (rename, move, language suffix matching).
 - [x] Directory batch processing and continuous watch (stability check + retry).
-- [ ] Support loading options from config file (e.g., output location).
+- [ ] Support config-file option policy: keep invocation-unique args in CLI (e.g., `name --name`, `file --input` for file path), and persist reusable defaults in config (e.g., `dir/watch --input` for directory, plus shared `--script` / `--output` / `--input-name-rule` / `--folder-multi` / `--max-depth`).
 - [ ] Support saving images to local storage.
+- [ ] Support multi-threaded fetching.
+- [ ] Support multi-source data aggregation.
+- [ ] Support passing multiple input files in `file` mode for unified migration and naming of split parts.
+- [ ] Support auto-detecting split video parts in the same directory in `dir` and `watch` modes, then applying unified migration and naming.
 - [ ] Support `tag` and other node-name mapping.
 
 ## weevil-lua
