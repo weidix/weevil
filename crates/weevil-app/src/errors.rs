@@ -113,6 +113,9 @@ pub(crate) enum AppError {
         mode: &'static str,
         field: &'static str,
     },
+    ImageHttpNotAllowed {
+        url: String,
+    },
 }
 
 impl AppError {
@@ -261,6 +264,9 @@ impl fmt::Display for AppError {
                     f,
                     "missing required config field for mode {mode:?}: {field:?}"
                 )
+            }
+            AppError::ImageHttpNotAllowed { url } => {
+                write!(f, "image URL must use HTTPS, HTTP is not allowed: {url}")
             }
         }
     }

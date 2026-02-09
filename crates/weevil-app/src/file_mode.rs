@@ -1,9 +1,11 @@
 use crate::app::{TaskContext, render_nfo_output};
 use crate::errors::{AppError, LinkKind};
+use crate::image_store::localize_movie_images;
 use crate::mode_params::{FileModeParams, MultiFolderStrategy};
 use crate::nfo::Movie;
 use fs2::FileExt;
 use quick_xml::de::from_str;
+use serde::Serialize;
 use std::fs;
 use std::fs::File;
 use std::path::{Path, PathBuf};
@@ -31,7 +33,7 @@ pub(crate) fn run_file_mode(input: &Path, params: &FileModeParams) -> Result<(),
         .call((input_name.as_str(), input_path.as_str()))
         .map_err(AppError::LuaPlugin)?;
     let xml = render_nfo_output(value, plugin.lua())?;
-    let movie: Movie = from_str(&xml).map_err(AppError::NfoParse)?;
+    let mut movie: Movie = from_str(&xml).map_err(AppError::NfoParse)?;
 
     let output_paths = format_output_paths(params.output_template(), &movie, &input_stem)?;
     let selected = select_output_paths(
@@ -47,12 +49,29 @@ pub(crate) fn run_file_mode(input: &Path, params: &FileModeParams) -> Result<(),
         ensure_output_dir(&output.dir)?;
     }
 
+    let localized_images = localize_movie_images(
+        &mut movie,
+        &primary_output.dir,
+        &primary_output.file_base,
+        plugin.trusted_urls(),
+    )?;
+    let xml_output = if localized_images.is_empty() {
+        xml
+    } else {
+        serialize_movie(&movie)?
+    };
+
     let input_extension = extension_string(input)?;
     let subtitles = find_subtitles(input, &input_stem)?;
-    let primary_targets = build_output_targets(&primary_output, &input_extension, &subtitles)?;
+    let primary_targets = build_output_targets(
+        &primary_output,
+        &input_extension,
+        &subtitles,
+        &localized_images,
+    )?;
     let extra_targets = extra_outputs
         .iter()
-        .map(|output| build_output_targets(output, &input_extension, &subtitles))
+        .map(|output| build_output_targets(output, &input_extension, &subtitles, &localized_images))
         .collect::<Result<Vec<_>, AppError>>()?;
 
     let subtitle_moves = subtitles
@@ -70,12 +89,14 @@ pub(crate) fn run_file_mode(input: &Path, params: &FileModeParams) -> Result<(),
     moves.extend(subtitle_moves);
 
     preflight_moves(&moves)?;
-    let mut link_targets = Vec::with_capacity(1 + extra_targets.len() * 3);
+    let mut link_targets =
+        Vec::with_capacity(1 + extra_targets.len() * (3 + localized_images.len()));
     link_targets.push(primary_targets.nfo.clone());
     for targets in &extra_targets {
         link_targets.push(targets.video.clone());
         link_targets.push(targets.nfo.clone());
         link_targets.extend(targets.subtitles.iter().cloned());
+        link_targets.extend(targets.images.iter().cloned());
     }
     preflight_output_paths(&link_targets)?;
 
@@ -83,7 +104,7 @@ pub(crate) fn run_file_mode(input: &Path, params: &FileModeParams) -> Result<(),
         move_locked_file(&item.from, &item.to)?;
     }
 
-    fs::write(&primary_targets.nfo, xml).map_err(|err| AppError::OutputWrite {
+    fs::write(&primary_targets.nfo, xml_output).map_err(|err| AppError::OutputWrite {
         path: primary_targets.nfo.clone(),
         source: err,
     })?;
@@ -104,6 +125,7 @@ struct OutputTargets {
     video: PathBuf,
     nfo: PathBuf,
     subtitles: Vec<PathBuf>,
+    images: Vec<PathBuf>,
 }
 
 struct SelectedOutputs {
@@ -275,6 +297,7 @@ fn build_output_targets(
     output: &OutputPath,
     input_extension: &Option<String>,
     subtitles: &[SubtitleMatch],
+    local_images: &[String],
 ) -> Result<OutputTargets, AppError> {
     let video = output.dir.join(build_file_name(
         &output.file_base,
@@ -289,10 +312,15 @@ fn build_output_targets(
             &output.dir,
         )?);
     }
+    let images = local_images
+        .iter()
+        .map(|file_name| output.dir.join(file_name))
+        .collect::<Vec<_>>();
     Ok(OutputTargets {
         video,
         nfo,
         subtitles: subtitle_targets,
+        images,
     })
 }
 
@@ -340,8 +368,26 @@ fn create_links(
     for (from, to) in primary.subtitles.iter().zip(targets.subtitles.iter()) {
         create_link(strategy, from, to)?;
     }
+    assert_eq!(
+        primary.images.len(),
+        targets.images.len(),
+        "image target length mismatch"
+    );
+    for (from, to) in primary.images.iter().zip(targets.images.iter()) {
+        create_link(strategy, from, to)?;
+    }
     create_link(strategy, &primary.nfo, &targets.nfo)?;
     Ok(())
+}
+
+fn serialize_movie(movie: &Movie) -> Result<String, AppError> {
+    let mut buffer = String::new();
+    let mut serializer = quick_xml::se::Serializer::new(&mut buffer);
+    serializer.indent(' ', 2);
+    movie
+        .serialize(serializer)
+        .map_err(AppError::SerializeNfo)?;
+    Ok(buffer)
 }
 
 fn create_link(strategy: MultiFolderStrategy, from: &Path, to: &Path) -> Result<(), AppError> {

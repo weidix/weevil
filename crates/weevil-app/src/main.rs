@@ -4,6 +4,7 @@ mod config;
 mod dir_mode;
 mod errors;
 mod file_mode;
+mod image_store;
 mod logging;
 mod mode_params;
 mod nfo;

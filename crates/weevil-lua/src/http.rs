@@ -225,6 +225,40 @@ impl HttpClient {
         })
     }
 
+    pub fn get_bytes_blocking(
+        &self,
+        url: &str,
+        options: &HttpRequestOptions,
+    ) -> Result<Vec<u8>, LuaPluginError> {
+        let parsed = self.ensure_trusted(url)?;
+        let mut request = self.blocking.get(parsed.as_str());
+        if let Some(version) = options.version {
+            request = request.version(version);
+        }
+        if !options.headers.is_empty() {
+            let header_map = build_headers(&options.headers)?;
+            request = request.headers(header_map);
+        }
+        let response = request.send().map_err(|err| LuaPluginError::HttpRequest {
+            url: parsed.to_string(),
+            source: err,
+        })?;
+        let status = response.status();
+        if !status.is_success() {
+            return Err(LuaPluginError::HttpStatus {
+                url: parsed.to_string(),
+                status: status.as_u16(),
+            });
+        }
+        let bytes = response
+            .bytes()
+            .map_err(|err| LuaPluginError::HttpRequest {
+                url: parsed.to_string(),
+                source: err,
+            })?;
+        Ok(bytes.to_vec())
+    }
+
     pub fn post_blocking(
         &self,
         url: &str,

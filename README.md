@@ -17,6 +17,7 @@ parsing, anti-bot handling, field mapping) is provided by scripts, currently via
 - Process a single video file (`file` mode):
   - Call Lua script with normalized input name and source file path.
   - Generate NFO from Lua output.
+  - Localize `thumb` / `fanart` image URLs into local files next to output NFO.
   - Move/rename video file.
   - Detect and move matching subtitle files with normalized language suffixes.
 - Batch process a directory (`dir` mode) with optional max traversal depth.
@@ -263,6 +264,12 @@ Subtitle matching currently supports:
 - Name normalization and noise-token filtering (e.g. resolution/codec tags).
 - Language suffix normalization (examples: `zh_CN -> zh-CN`, `en_US -> en-US`, `pt_br -> pt-BR`).
 - Carrying extra subtitle suffix tokens (for example `forced`).
+
+## Image Localization
+
+- For NFO `thumb` and `fanart.thumb` fields, only remote `https` URLs are downloaded to local files in the primary output folder (`http` is rejected).
+- After a local image file exists, reruns reuse that local file and do not fetch the same remote URL again.
+- In `hard-link` / `soft-link` multi-folder mode, localized images are linked into extra output folders along with video/NFO/subtitles.
 
 ## Lua Runtime API (`weevil-lua`)
 
