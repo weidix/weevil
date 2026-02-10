@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
@@ -25,7 +25,7 @@ impl ScriptThrottleState {
     }
 }
 
-pub(crate) type FetchTaskResult = (PathBuf, Result<(), String>);
+pub(crate) type FetchTaskResult = (Vec<PathBuf>, Result<(), String>);
 
 pub(crate) fn preflight_script(
     fetch: &FetchModeParams,
@@ -34,30 +34,30 @@ pub(crate) fn preflight_script(
     preflight_script_for_multithread(fetch, script_paths)
 }
 pub(crate) fn run_batch_fetch(
-    files: Vec<PathBuf>,
+    groups: Vec<Vec<PathBuf>>,
     params: &FileModeParams,
     fetch: &FetchModeParams,
 ) -> Result<(), AppError> {
     preflight_script_for_multithread(fetch, params.scripts())?;
 
-    if files.is_empty() {
+    if groups.is_empty() {
         return Ok(());
     }
 
     if fetch.fetch_threads() == 1 {
         return run_serial_for_dir(
-            files,
+            groups,
             params,
             fetch.throttle_same_script(),
             fetch.script_throttle_base_ms(),
         );
     }
 
-    let results = run_batch_fetch_with_results(files, params, fetch)?;
-    for (path, result) in results {
+    let results = run_batch_fetch_with_results(groups, params, fetch)?;
+    for (group, result) in results {
         if let Err(reason) = result {
             return Err(AppError::FetchRuntime {
-                reason: format!("task {:?} failed: {reason}", path),
+                reason: format!("task {:?} failed: {reason}", group),
             });
         }
     }
@@ -65,105 +65,107 @@ pub(crate) fn run_batch_fetch(
 }
 
 fn run_serial_for_dir(
-    files: Vec<PathBuf>,
+    groups: Vec<Vec<PathBuf>>,
     params: &FileModeParams,
     throttle_same_script: bool,
     throttle_base_ms: u64,
 ) -> Result<(), AppError> {
     let mut has_previous = false;
-    for file in files {
+    for group in groups {
         if throttle_same_script && has_previous {
             throttle_script_execution(throttle_base_ms);
         }
-        file_mode::run_file_mode(&file, params)?;
+        file_mode::run_file_mode_inputs(&group, params)?;
         has_previous = true;
     }
     Ok(())
 }
 
 pub(crate) fn run_batch_fetch_with_results(
-    files: Vec<PathBuf>,
+    groups: Vec<Vec<PathBuf>>,
     params: &FileModeParams,
     fetch: &FetchModeParams,
 ) -> Result<Vec<FetchTaskResult>, AppError> {
-    if files.is_empty() {
+    if groups.is_empty() {
         return Ok(Vec::new());
     }
 
     if fetch.fetch_threads() == 1 {
         Ok(run_serial(
-            files,
+            groups,
             params,
             fetch.throttle_same_script(),
             fetch.script_throttle_base_ms(),
         ))
     } else {
-        run_parallel(files, params, fetch)
+        run_parallel(groups, params, fetch)
     }
 }
 
 fn run_serial(
-    files: Vec<PathBuf>,
+    groups: Vec<Vec<PathBuf>>,
     params: &FileModeParams,
     throttle_same_script: bool,
     throttle_base_ms: u64,
 ) -> Vec<FetchTaskResult> {
-    let execute =
-        |path: &Path| file_mode::run_file_mode(path, params).map_err(|err| err.to_string());
-    run_serial_with_executor(files, throttle_same_script, throttle_base_ms, &execute)
+    let execute = |inputs: &[PathBuf]| {
+        file_mode::run_file_mode_inputs(inputs, params).map_err(|err| err.to_string())
+    };
+    run_serial_with_executor(groups, throttle_same_script, throttle_base_ms, &execute)
 }
 
 fn run_serial_with_executor<F>(
-    files: Vec<PathBuf>,
+    groups: Vec<Vec<PathBuf>>,
     throttle_same_script: bool,
     throttle_base_ms: u64,
     execute: &F,
 ) -> Vec<FetchTaskResult>
 where
-    F: Fn(&Path) -> Result<(), String>,
+    F: Fn(&[PathBuf]) -> Result<(), String>,
 {
-    let mut results = Vec::with_capacity(files.len());
+    let mut results = Vec::with_capacity(groups.len());
     let mut has_previous = false;
-    for file in files {
+    for group in groups {
         if throttle_same_script && has_previous {
             throttle_script_execution(throttle_base_ms);
         }
-        let result = execute(file.as_path());
-        results.push((file, result));
+        let result = execute(&group);
+        results.push((group, result));
         has_previous = true;
     }
     results
 }
 
 fn run_parallel(
-    files: Vec<PathBuf>,
+    groups: Vec<Vec<PathBuf>>,
     params: &FileModeParams,
     fetch: &FetchModeParams,
 ) -> Result<Vec<FetchTaskResult>, AppError> {
-    let execute =
-        |path: &Path| file_mode::run_file_mode(path, params).map_err(|err| err.to_string());
-    run_parallel_with_executor(files, fetch, &execute)
+    let execute = |inputs: &[PathBuf]| {
+        file_mode::run_file_mode_inputs(inputs, params).map_err(|err| err.to_string())
+    };
+    run_parallel_with_executor(groups, fetch, &execute)
 }
 
 fn run_parallel_with_executor<F>(
-    files: Vec<PathBuf>,
+    groups: Vec<Vec<PathBuf>>,
     fetch: &FetchModeParams,
     execute: &F,
 ) -> Result<Vec<FetchTaskResult>, AppError>
 where
-    F: Fn(&Path) -> Result<(), String> + Sync,
+    F: Fn(&[PathBuf]) -> Result<(), String> + Sync,
 {
-    let worker_count = effective_worker_count(fetch.fetch_threads(), files.len());
+    let worker_count = effective_worker_count(fetch.fetch_threads(), groups.len());
     if worker_count <= 1 {
         return Ok(run_serial_with_executor(
-            files,
+            groups,
             fetch.throttle_same_script(),
             fetch.script_throttle_base_ms(),
             execute,
         ));
     }
 
-    let input_queue = Arc::new(std::sync::Mutex::new(files.into_iter()));
+    let input_queue = Arc::new(std::sync::Mutex::new(groups.into_iter()));
     let runtime_error = Arc::new(std::sync::Mutex::new(None::<String>));
     let results = Arc::new(std::sync::Mutex::new(Vec::<FetchTaskResult>::new()));
     let stop_flag = Arc::new(AtomicBool::new(false));
@@ -210,9 +212,9 @@ where
 }
 
 fn worker_loop(
-    queue: Arc<std::sync::Mutex<std::vec::IntoIter<PathBuf>>>,
+    queue: Arc<std::sync::Mutex<std::vec::IntoIter<Vec<PathBuf>>>>,
     script_gate: Option<Arc<std::sync::Mutex<ScriptThrottleState>>>,
-    execute: &impl Fn(&Path) -> Result<(), String>,
+    execute: &impl Fn(&[PathBuf]) -> Result<(), String>,
     results: Arc<std::sync::Mutex<Vec<FetchTaskResult>>>,
     runtime_error: Arc<std::sync::Mutex<Option<String>>>,
     stop_flag: Arc<AtomicBool>,
@@ -238,7 +240,7 @@ fn worker_loop(
             queue.next()
         };
 
-        let Some(file) = next_file else {
+        let Some(group) = next_file else {
             return;
         };
 
@@ -257,15 +259,15 @@ fn worker_loop(
             if state.has_previous_task {
                 throttle_script_execution(throttle_base_ms);
             }
-            let result = execute(file.as_path());
+            let result = execute(&group);
             state.has_previous_task = true;
             result
         } else {
-            execute(file.as_path())
+            execute(&group)
         };
 
         let has_error = result.is_err();
-        if push_task_result(&results, (file, result)).is_err() {
+        if push_task_result(&results, (group, result)).is_err() {
             store_runtime_error(
                 &runtime_error,
                 "failed to write task result".to_string(),
@@ -428,14 +430,14 @@ mod tests {
     #[test]
     fn parallel_executor_never_exceeds_configured_limit() {
         let task_count = 20;
-        let files = (0..task_count)
-            .map(|index| PathBuf::from(format!("task-{index}.mkv")))
+        let groups = (0..task_count)
+            .map(|index| vec![PathBuf::from(format!("task-{index}.mkv"))])
             .collect::<Vec<_>>();
         let fetch = FetchModeParams::new(3, false, 0);
 
         let active = AtomicUsize::new(0);
         let peak = AtomicUsize::new(0);
-        let execute = |_: &Path| -> Result<(), String> {
+        let execute = |_: &[PathBuf]| -> Result<(), String> {
             let current = active.fetch_add(1, Ordering::SeqCst) + 1;
 
             loop {
@@ -456,7 +458,7 @@ mod tests {
             Ok(())
         };
 
-        let results = run_parallel_with_executor(files, &fetch, &execute).expect("run parallel");
+        let results = run_parallel_with_executor(groups, &fetch, &execute).expect("run parallel");
         assert_eq!(results.len(), task_count);
         assert!(results.iter().all(|(_, result)| result.is_ok()));
         assert!(peak.load(Ordering::SeqCst) <= 3);
@@ -466,14 +468,14 @@ mod tests {
     #[test]
     fn throttle_same_script_prevents_parallel_script_execution() {
         let task_count = 16;
-        let files = (0..task_count)
-            .map(|index| PathBuf::from(format!("throttle-task-{index}.mkv")))
+        let groups = (0..task_count)
+            .map(|index| vec![PathBuf::from(format!("throttle-task-{index}.mkv"))])
             .collect::<Vec<_>>();
         let fetch = FetchModeParams::new(4, true, 0);
 
         let active = AtomicUsize::new(0);
         let peak = AtomicUsize::new(0);
-        let execute = |_: &Path| -> Result<(), String> {
+        let execute = |_: &[PathBuf]| -> Result<(), String> {
             let current = active.fetch_add(1, Ordering::SeqCst) + 1;
 
             loop {
@@ -494,7 +496,7 @@ mod tests {
             Ok(())
         };
 
-        let results = run_parallel_with_executor(files, &fetch, &execute).expect("run parallel");
+        let results = run_parallel_with_executor(groups, &fetch, &execute).expect("run parallel");
         assert_eq!(results.len(), task_count);
         assert!(results.iter().all(|(_, result)| result.is_ok()));
         assert_eq!(peak.load(Ordering::SeqCst), 1);

@@ -12,6 +12,7 @@ mod nfo;
 mod script_info;
 mod source_priority;
 mod source_runner;
+mod video_parts;
 mod watch_mode;
 
 fn main() {

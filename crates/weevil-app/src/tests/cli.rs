@@ -121,7 +121,7 @@ fn parse_file_mode() {
         multi_source_max_sources,
     } = cli.command
     {
-        assert_eq!(input, PathBuf::from("movie.mkv"));
+        assert_eq!(input, vec![PathBuf::from("movie.mkv")]);
         assert_eq!(scripts, vec![PathBuf::from("script.lua")]);
         assert_eq!(output, Some("library/{title}".to_string()));
         assert_eq!(input_name_rules, vec!["1080p,WEB-DL"]);
@@ -129,6 +129,36 @@ fn parse_file_mode() {
         assert!(!multi_source);
         assert!(!save_images);
         assert_eq!(multi_source_max_sources, None);
+    } else {
+        panic!("expected file command");
+    }
+}
+
+#[test]
+fn parse_file_mode_multiple_inputs() {
+    let cli = Cli::try_parse_from([
+        "weevil",
+        "file",
+        "--input",
+        "movie-CD1.mkv",
+        "--input",
+        "movie-CD2.mkv",
+        "--script",
+        "script.lua",
+        "--output",
+        "library/{title}",
+    ])
+    .expect("expected command");
+
+    if let Command::File { input, scripts, .. } = cli.command {
+        assert_eq!(
+            input,
+            vec![
+                PathBuf::from("movie-CD1.mkv"),
+                PathBuf::from("movie-CD2.mkv")
+            ]
+        );
+        assert_eq!(scripts, vec![PathBuf::from("script.lua")]);
     } else {
         panic!("expected file command");
     }

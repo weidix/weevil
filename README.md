@@ -14,14 +14,16 @@ parsing, anti-bot handling, field mapping) is provided by scripts, currently via
 ## Current Capabilities (2026)
 
 - Generate NFO by title (`name` mode).
-- Process a single video file (`file` mode):
+- Process one or multiple video files (`file` mode):
   - Call Lua script with normalized input name and source file path.
   - Generate NFO from Lua output.
   - Localize `thumb` / `fanart` image URLs into local files next to output NFO.
-  - Move/rename video file.
+  - Move/rename video files.
+  - Support unified migration and naming for split parts (`.part01`, `.part02`, ...).
   - Detect and move matching subtitle files with normalized language suffixes.
 - Batch process a directory (`dir` mode) with optional max traversal depth.
 - Continuous folder watching (`watch` mode) for newly completed video files.
+- Auto-detect split video parts in the same directory in `dir` / `watch`.
 - Multi-output routing by template + optional hard-link/soft-link fan-out.
 - Multi-threaded fetching for `dir` / `watch` (cross-file concurrency only; no multi-script concurrency inside one file).
 
@@ -233,11 +235,12 @@ cargo run -p weevil-app -- --config ./weevil.toml name --name "sample title"
 
 ### 2) `file`
 
-Generate NFO from one video file, then rename/move related assets.
+Generate NFO from one or multiple video files, then rename/move related assets.
 
 ```bash
 cargo run -p weevil-app -- file \
   --input ./videos/sample-video.mp4 \
+  --input ./videos/sample-video-CD2.mp4 \
   --script demo_lua/source_alpha/lua/source_alpha.lua \
   --output "./library/{title}" \
   --input-name-rule "1080p,WEB-DL" \
@@ -245,6 +248,9 @@ cargo run -p weevil-app -- file \
   --input-name-rule "replace:_=> " \
   --folder-multi first
 ```
+
+When repeated `--input` values are split parts in one invocation (for example `CD1` / `CD2`),
+they are migrated as one group and renamed with `.part01`, `.part02`, ... suffixes.
 
 ### 3) `dir`
 
@@ -277,6 +283,7 @@ cargo run -p weevil-app -- watch \
 Watch behavior today:
 
 - Processes `Create`/`Modify`/`Remove` file events.
+- Auto-groups split video parts from the same directory before processing ready files.
 
 ### 5) `scripts`
 
@@ -343,6 +350,18 @@ Behavior:
 
 `mkv`, `mp4`, `avi`, `mov`, `m4v`, `wmv`, `flv`, `webm`, `ts`, `m2ts`, `mts`, `mpg`, `mpeg`
 
+### Split-part detection
+
+Split parts are detected when filename stems end with one of the following prefixes plus an index:
+
+- `CD1`, `CD2`, ...
+- `Disc1`, `Disc2`, ...
+- `Disk1`, `Disk2`, ...
+- `Part1`, `Part2`, ...
+- `Pt1`, `Pt2`, ...
+
+Detected split parts are migrated with unified output suffixes `.part01`, `.part02`, ...
+
 ### Subtitle file extensions
 
 `srt`, `ass`, `ssa`, `vtt`, `sub`, `idx`, `sup`
@@ -352,6 +371,9 @@ Subtitle matching currently supports:
 - Name normalization and noise-token filtering (e.g. resolution/codec tags).
 - Language suffix normalization (examples: `zh_CN -> zh-CN`, `en_US -> en-US`, `pt_br -> pt-BR`).
 - Carrying extra subtitle suffix tokens (for example `forced`).
+- For split-part groups:
+  - Part subtitles (e.g. `Movie-CD1.zh.srt`) are mapped to the corresponding part output.
+  - Group subtitles (e.g. `Movie.zh.srt`) are mapped once to the group output (without `.partXX`).
 
 ## Image Localization
 
@@ -430,6 +452,9 @@ Unsupported constructs return `QueryExecError` with feature category and hint.
   - `demo_lua/source_alpha/lua/source_alpha.lua`
   - `demo_lua/source_beta/lua/source_beta.lua`
   - `demo_lua/source_gamma/lua/source_gamma.lua`
+- Split-parts migration demo:
+  - `demo_lua/split_parts_example/lua/split_demo.lua`
+  - `demo_lua/split_parts_example/incoming/`
 
 ## Known Boundaries / Non-goals
 

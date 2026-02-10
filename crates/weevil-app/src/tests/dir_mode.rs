@@ -63,3 +63,23 @@ fn fetch_mode_detects_multithread() {
     let unlimited = FetchModeParams::new(0, true, 1000);
     assert!(unlimited.multithread_enabled());
 }
+
+#[test]
+fn group_video_paths_merges_split_parts() {
+    let files = vec![
+        PathBuf::from("in/Movie-CD2.mkv"),
+        PathBuf::from("in/Movie-CD1.mkv"),
+        PathBuf::from("in/Other.mkv"),
+    ];
+
+    let groups = crate::video_parts::group_video_paths(&files).expect("grouped");
+    assert_eq!(groups.len(), 2);
+    assert_eq!(
+        groups[0],
+        vec![
+            PathBuf::from("in/Movie-CD1.mkv"),
+            PathBuf::from("in/Movie-CD2.mkv")
+        ]
+    );
+    assert_eq!(groups[1], vec![PathBuf::from("in/Other.mkv")]);
+}

@@ -13,6 +13,7 @@ use crate::dir_mode;
 use crate::errors::AppError;
 use crate::fetch_runtime;
 use crate::mode_params::{FetchModeParams, FileModeParams};
+use crate::video_parts;
 
 const STABLE_WINDOW: Duration = Duration::from_secs(3);
 const CHECK_TICK: Duration = Duration::from_secs(1);
@@ -97,19 +98,25 @@ fn process_ready_files(
         return Ok(());
     }
 
+    let ready_groups = group_ready_files(&ready)?;
+
     let now = Instant::now();
-    let results = fetch_runtime::run_batch_fetch_with_results(ready, params, fetch)?;
-    for (path, result) in results {
+    let results = fetch_runtime::run_batch_fetch_with_results(ready_groups, params, fetch)?;
+    for (group, result) in results {
         match result {
             Ok(()) => {
-                info!("watch processed file: {:?}", path);
-                seen.insert(path.clone());
-                pending.remove(&path);
+                info!("watch processed files: {:?}", group);
+                for path in group {
+                    seen.insert(path.clone());
+                    pending.remove(&path);
+                }
             }
             Err(err) => {
-                info!("watch failed for {:?}: {}", path, err);
-                if let Some(retry_state) = pending.get_mut(&path) {
-                    retry_state.next_retry_at = now + FAILURE_BACKOFF;
+                info!("watch failed for {:?}: {}", group, err);
+                for path in group {
+                    if let Some(retry_state) = pending.get_mut(&path) {
+                        retry_state.next_retry_at = now + FAILURE_BACKOFF;
+                    }
                 }
             }
         }
@@ -169,6 +176,25 @@ fn collect_ready_files(
     }
 
     ready_files
+}
+
+fn group_ready_files(paths: &[PathBuf]) -> Result<Vec<Vec<PathBuf>>, AppError> {
+    let mut groups = Vec::new();
+    let mut seen = HashSet::new();
+
+    for path in paths {
+        if seen.contains(path) {
+            continue;
+        }
+        let mut group = video_parts::sibling_split_group_paths(path)?;
+        group.sort();
+        for part in &group {
+            seen.insert(part.clone());
+        }
+        groups.push(group);
+    }
+
+    Ok(groups)
 }
 
 fn handle_event(

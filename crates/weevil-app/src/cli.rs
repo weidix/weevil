@@ -77,8 +77,15 @@ pub(crate) enum Command {
         after_help = "Required effective fields:\n  script, output\n\nField priority (high -> low):\n  --script/--output/--input-name-rule/--folder-multi\n  > [file]\n  > [shared]"
     )]
     File {
-        #[arg(long, short = 'i', value_name = "FILE")]
-        input: PathBuf,
+        #[arg(
+            long,
+            short = 'i',
+            value_name = "FILE",
+            num_args = 1..,
+            action = clap::ArgAction::Append,
+            help = "Input file path; can be repeated. Split-part files in the same directory can be migrated with unified naming."
+        )]
+        input: Vec<PathBuf>,
         #[arg(
             long = "script",
             short = 's',

@@ -60,6 +60,11 @@ pub(crate) fn run() -> Result<(), AppError> {
             save_images,
             multi_source_max_sources,
         } => {
+            if input.is_empty() {
+                return Err(AppError::FetchRuntime {
+                    reason: "file mode requires at least one --input".to_string(),
+                });
+            }
             let resolved = config.resolve_file_mode_with(&ModeCliOverrides {
                 scripts,
                 output,
@@ -74,7 +79,7 @@ pub(crate) fn run() -> Result<(), AppError> {
             })?;
             let resolved = dedupe_resolved_script_aliases(resolved)?;
             let params = file_mode_params_from_config(resolved);
-            file_mode::run_file_mode(&input, &params)
+            file_mode::run_file_mode_inputs(&input, &params)
         }
         Command::Dir {
             input,

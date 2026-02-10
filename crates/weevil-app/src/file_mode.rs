@@ -1,27 +1,50 @@
 use crate::app::TaskContext;
-use crate::errors::{AppError, LinkKind};
+use crate::errors::AppError;
 use crate::image_store::localize_movie_images;
 use crate::mode_params::{FileModeParams, MultiFolderStrategy};
 use crate::source_runner;
-use fs2::FileExt;
+use crate::video_parts::{self, VideoInputGroup, VideoInputPart};
 use std::fs;
-use std::fs::File;
 use std::path::{Path, PathBuf};
 
+mod fs_ops;
 mod input_name;
 mod naming;
 mod subtitle_match;
 
+use fs_ops::{create_link, move_locked_file};
 use input_name::format_input_name;
 use naming::{build_file_name, format_output_paths};
 pub(crate) use subtitle_match::subtitle_suffix;
 
 const SUBTITLE_EXTENSIONS: &[&str] = &["srt", "ass", "ssa", "vtt", "sub", "idx", "sup"];
-pub(crate) fn run_file_mode(input: &Path, params: &FileModeParams) -> Result<(), AppError> {
-    ensure_input_file(input)?;
-    let input_stem = file_stem_string(input)?;
-    let input_name = format_input_name(&input_stem, params.input_name_rules())?;
-    let input_path = path_to_string(input)?;
+
+pub(crate) fn run_file_mode_inputs(
+    inputs: &[PathBuf],
+    params: &FileModeParams,
+) -> Result<(), AppError> {
+    let groups = video_parts::group_video_inputs(inputs)?;
+    if groups.is_empty() {
+        return Err(AppError::FetchRuntime {
+            reason: "file mode requires at least one input path".to_string(),
+        });
+    }
+
+    for group in &groups {
+        run_file_mode_group(group, params)?;
+    }
+    Ok(())
+}
+
+pub(crate) fn run_file_mode_group(
+    group: &VideoInputGroup,
+    params: &FileModeParams,
+) -> Result<(), AppError> {
+    for part in &group.parts {
+        ensure_input_file(&part.path)?;
+    }
+    let input_name = format_input_name(&group.input_stem, params.input_name_rules())?;
+    let input_path = path_to_string(&group.primary_path)?;
 
     let task = TaskContext::new("file");
     let source_output = source_runner::run_file_scripts(
@@ -36,7 +59,7 @@ pub(crate) fn run_file_mode(input: &Path, params: &FileModeParams) -> Result<(),
     )?;
     let mut movie = source_output.movie;
 
-    let output_paths = format_output_paths(params.output_template(), &movie, &input_stem)?;
+    let output_paths = format_output_paths(params.output_template(), &movie, &group.input_stem)?;
     let selected = select_output_paths(
         output_paths,
         params.output_template(),
@@ -72,41 +95,32 @@ pub(crate) fn run_file_mode(input: &Path, params: &FileModeParams) -> Result<(),
         (Vec::new(), xml_output)
     };
 
-    let input_extension = extension_string(input)?;
-    let subtitles = find_subtitles(input, &input_stem)?;
+    let subtitle_plans = collect_group_subtitle_plans(group)?;
+
     let primary_targets = build_output_targets(
         &primary_output,
-        &input_extension,
-        &subtitles,
+        &group.parts,
+        &subtitle_plans,
         &localized_images,
     )?;
     let extra_targets = extra_outputs
         .iter()
-        .map(|output| build_output_targets(output, &input_extension, &subtitles, &localized_images))
+        .map(|output| {
+            build_output_targets(output, &group.parts, &subtitle_plans, &localized_images)
+        })
         .collect::<Result<Vec<_>, AppError>>()?;
 
-    let subtitle_moves = subtitles
-        .iter()
-        .map(|subtitle| {
-            build_subtitle_move(subtitle, &primary_output.file_base, &primary_output.dir)
-        })
-        .collect::<Result<Vec<MoveItem>, AppError>>()?;
-
-    let mut moves = Vec::with_capacity(1 + subtitle_moves.len());
-    moves.push(MoveItem {
-        from: input.to_path_buf(),
-        to: primary_targets.video.clone(),
-    });
-    moves.extend(subtitle_moves);
+    let moves = build_moves_for_group(group, &primary_output, &subtitle_plans)?;
 
     preflight_moves(&moves)?;
-    let mut link_targets =
-        Vec::with_capacity(1 + extra_targets.len() * (3 + localized_images.len()));
+    let mut link_targets = Vec::with_capacity(
+        1 + extra_targets.len() * (2 + group.parts.len() + localized_images.len()),
+    );
     link_targets.push(primary_targets.nfo.clone());
     for targets in &extra_targets {
-        link_targets.push(targets.video.clone());
+        link_targets.extend(targets.videos.iter().cloned());
         link_targets.push(targets.nfo.clone());
-        link_targets.extend(targets.subtitles.iter().cloned());
+        link_targets.extend(targets.subtitles.iter().map(|item| item.path.clone()));
         link_targets.extend(targets.images.iter().cloned());
     }
     preflight_output_paths(&link_targets)?;
@@ -133,10 +147,23 @@ pub(crate) fn run_file_mode(input: &Path, params: &FileModeParams) -> Result<(),
 }
 
 struct OutputTargets {
-    video: PathBuf,
+    videos: Vec<PathBuf>,
     nfo: PathBuf,
-    subtitles: Vec<PathBuf>,
+    subtitles: Vec<SubtitleTarget>,
     images: Vec<PathBuf>,
+}
+
+#[derive(Debug, Clone)]
+struct SubtitlePlan {
+    path: PathBuf,
+    target_base: String,
+    sort_key: String,
+}
+
+#[derive(Debug, Clone)]
+struct SubtitleTarget {
+    path: PathBuf,
+    sort_key: String,
 }
 
 struct SelectedOutputs {
@@ -213,14 +240,6 @@ fn path_to_string(path: &Path) -> Result<String, AppError> {
             path: path.to_path_buf(),
         })
 }
-fn file_stem_string(path: &Path) -> Result<String, AppError> {
-    path.file_stem()
-        .and_then(|value| value.to_str())
-        .map(|value| value.to_string())
-        .ok_or_else(|| AppError::PathStemNotUtf8 {
-            path: path.to_path_buf(),
-        })
-}
 fn extension_string(path: &Path) -> Result<Option<String>, AppError> {
     match path.extension() {
         Some(value) => value
@@ -281,56 +300,45 @@ fn is_subtitle_path(path: &Path) -> bool {
         .any(|candidate| *candidate == extension)
 }
 
-fn build_subtitle_move(
-    subtitle: &SubtitleMatch,
-    file_base: &str,
-    target_dir: &Path,
-) -> Result<MoveItem, AppError> {
-    let target = build_subtitle_target(subtitle, file_base, target_dir)?;
-    Ok(MoveItem {
-        from: subtitle.path.clone(),
-        to: target,
-    })
-}
-
-fn build_subtitle_target(
-    subtitle: &SubtitleMatch,
-    file_base: &str,
-    target_dir: &Path,
-) -> Result<PathBuf, AppError> {
-    let extension = extension_string(&subtitle.path)?;
-    let target_base = format!("{file_base}{}", subtitle.suffix);
-    let target_name = build_file_name(&target_base, extension.as_deref());
-    Ok(target_dir.join(target_name))
-}
-
 fn build_output_targets(
     output: &OutputPath,
-    input_extension: &Option<String>,
-    subtitles: &[SubtitleMatch],
+    parts: &[VideoInputPart],
+    subtitle_plans: &[SubtitlePlan],
     local_images: &[String],
 ) -> Result<OutputTargets, AppError> {
-    let video = output.dir.join(build_file_name(
-        &output.file_base,
-        input_extension.as_deref(),
-    ));
-    let nfo = output.dir.join(format!("{}.nfo", output.file_base));
-    let mut subtitle_targets = Vec::with_capacity(subtitles.len());
-    for subtitle in subtitles {
-        subtitle_targets.push(build_subtitle_target(
-            subtitle,
-            &output.file_base,
-            &output.dir,
-        )?);
+    let mut videos = Vec::with_capacity(parts.len());
+    for part in parts {
+        let input_extension = extension_string(&part.path)?;
+        let part_base = format!("{}{}", output.file_base, part.output_suffix);
+        videos.push(
+            output
+                .dir
+                .join(build_file_name(&part_base, input_extension.as_deref())),
+        );
     }
+
+    let subtitles = subtitle_plans
+        .iter()
+        .map(|plan| {
+            let extension = extension_string(&plan.path)?;
+            let target_base = format!("{}{}", output.file_base, plan.target_base);
+            let target_name = build_file_name(&target_base, extension.as_deref());
+            Ok(SubtitleTarget {
+                path: output.dir.join(target_name),
+                sort_key: plan.sort_key.clone(),
+            })
+        })
+        .collect::<Result<Vec<_>, AppError>>()?;
+
+    let nfo = output.dir.join(format!("{}.nfo", output.file_base));
     let images = local_images
         .iter()
         .map(|file_name| output.dir.join(file_name))
         .collect::<Vec<_>>();
     Ok(OutputTargets {
-        video,
+        videos,
         nfo,
-        subtitles: subtitle_targets,
+        subtitles,
         images,
     })
 }
@@ -370,14 +378,22 @@ fn create_links(
     if matches!(strategy, MultiFolderStrategy::First) {
         return Ok(());
     }
-    create_link(strategy, &primary.video, &targets.video)?;
+    assert_eq!(
+        primary.videos.len(),
+        targets.videos.len(),
+        "video target length mismatch"
+    );
+    for (from, to) in primary.videos.iter().zip(targets.videos.iter()) {
+        create_link(strategy, from, to)?;
+    }
     assert_eq!(
         primary.subtitles.len(),
         targets.subtitles.len(),
         "subtitle target length mismatch"
     );
     for (from, to) in primary.subtitles.iter().zip(targets.subtitles.iter()) {
-        create_link(strategy, from, to)?;
+        assert_eq!(from.sort_key, to.sort_key, "subtitle link order mismatch");
+        create_link(strategy, &from.path, &to.path)?;
     }
     assert_eq!(
         primary.images.len(),
@@ -391,91 +407,142 @@ fn create_links(
     Ok(())
 }
 
-fn create_link(strategy: MultiFolderStrategy, from: &Path, to: &Path) -> Result<(), AppError> {
-    if from == to {
-        return Ok(());
+fn build_moves_for_group(
+    group: &VideoInputGroup,
+    output: &OutputPath,
+    subtitle_plans: &[SubtitlePlan],
+) -> Result<Vec<MoveItem>, AppError> {
+    let mut moves = Vec::new();
+
+    for part in &group.parts {
+        let input_extension = extension_string(&part.path)?;
+        let part_base = format!("{}{}", output.file_base, part.output_suffix);
+        let video_target = output
+            .dir
+            .join(build_file_name(&part_base, input_extension.as_deref()));
+        moves.push(MoveItem {
+            from: part.path.clone(),
+            to: video_target,
+        });
     }
-    match strategy {
-        MultiFolderStrategy::HardLink => {
-            fs::hard_link(from, to).map_err(|err| AppError::FileLink {
-                from: from.to_path_buf(),
-                to: to.to_path_buf(),
-                kind: LinkKind::Hard,
-                source: err,
-            })
-        }
-        MultiFolderStrategy::SoftLink => {
-            create_soft_link(from, to).map_err(|err| AppError::FileLink {
-                from: from.to_path_buf(),
-                to: to.to_path_buf(),
-                kind: LinkKind::Soft,
-                source: err,
-            })
-        }
-        MultiFolderStrategy::First => Ok(()),
+
+    for subtitle in subtitle_plans {
+        let target_base = format!("{}{}", output.file_base, subtitle.target_base);
+        let target = build_subtitle_target_by_base(&subtitle.path, &target_base, &output.dir)?;
+        moves.push(MoveItem {
+            from: subtitle.path.clone(),
+            to: target,
+        });
     }
+
+    Ok(moves)
 }
 
-fn create_soft_link(from: &Path, to: &Path) -> Result<(), std::io::Error> {
-    #[cfg(unix)]
-    {
-        std::os::unix::fs::symlink(from, to)
+fn collect_group_subtitle_plans(group: &VideoInputGroup) -> Result<Vec<SubtitlePlan>, AppError> {
+    let mut plans = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    let split_group = group.parts.len() > 1;
+
+    for part in &group.parts {
+        let part_base = part.output_suffix.clone();
+        let subtitles = find_subtitles(&part.path, &part.input_stem)?;
+        for subtitle in subtitles {
+            if split_group && !subtitle_has_split_marker(&subtitle.path)? {
+                continue;
+            }
+            if seen.insert(subtitle.path.clone()) {
+                let sort_key = format!("0:{}:{part_base}", subtitle_sort_key(&subtitle.path)?);
+                plans.push(SubtitlePlan {
+                    path: subtitle.path,
+                    target_base: format!("{part_base}{}", subtitle.suffix),
+                    sort_key,
+                });
+            }
+        }
     }
-    #[cfg(windows)]
-    {
-        std::os::windows::fs::symlink_file(from, to)
+
+    let group_subtitles = find_group_subtitles(group)?;
+    for subtitle in group_subtitles {
+        if seen.insert(subtitle.path.clone()) {
+            plans.push(SubtitlePlan {
+                sort_key: format!("1:{}", subtitle_sort_key(&subtitle.path)?),
+                path: subtitle.path,
+                target_base: subtitle.suffix,
+            });
+        }
     }
-    #[cfg(not(any(unix, windows)))]
-    {
-        Err(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            "soft links are not supported on this platform",
-        ))
-    }
+
+    plans.sort_by(|left, right| left.sort_key.cmp(&right.sort_key));
+    Ok(plans)
 }
 
-fn move_locked_file(from: &Path, to: &Path) -> Result<(), AppError> {
-    if from == to {
-        return Ok(());
-    }
-    let file = lock_exclusive(from)?;
-    match fs::rename(from, to) {
-        Ok(()) => Ok(()),
-        Err(err) if is_cross_device_error(&err) => {
-            fs::copy(from, to).map_err(|copy_err| AppError::FileCopy {
-                from: from.to_path_buf(),
-                to: to.to_path_buf(),
-                source: copy_err,
-            })?;
-            drop(file);
-            fs::remove_file(from).map_err(|remove_err| AppError::FileRemove {
-                path: from.to_path_buf(),
-                source: remove_err,
-            })?;
-            Ok(())
-        }
-        Err(err) => Err(AppError::FileMove {
-            from: from.to_path_buf(),
-            to: to.to_path_buf(),
+fn find_group_subtitles(group: &VideoInputGroup) -> Result<Vec<SubtitleMatch>, AppError> {
+    let parent = group
+        .primary_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."));
+    let entries = fs::read_dir(parent).map_err(|err| AppError::SubtitleScan {
+        path: parent.to_path_buf(),
+        source: err,
+    })?;
+
+    let mut matches = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(|err| AppError::SubtitleScan {
+            path: parent.to_path_buf(),
             source: err,
-        }),
+        })?;
+        let path = entry.path();
+        if !is_subtitle_path(&path) {
+            continue;
+        }
+        let stem = match path.file_stem().and_then(|value| value.to_str()) {
+            Some(value) => value,
+            None => {
+                return Err(AppError::PathStemNotUtf8 {
+                    path: path.to_path_buf(),
+                });
+            }
+        };
+        if video_parts::stem_contains_split_marker(stem) {
+            continue;
+        }
+        if let Some(suffix) = subtitle_suffix(&group.input_stem, stem) {
+            matches.push(SubtitleMatch { path, suffix });
+        }
     }
+
+    matches.sort_by(|left, right| left.path.cmp(&right.path));
+    Ok(matches)
 }
 
-fn is_cross_device_error(error: &std::io::Error) -> bool {
-    error.raw_os_error() == Some(18)
+fn subtitle_sort_key(path: &Path) -> Result<String, AppError> {
+    path.file_name()
+        .and_then(|value| value.to_str())
+        .map(|value| value.to_ascii_lowercase())
+        .ok_or_else(|| AppError::PathNotUtf8 {
+            path: path.to_path_buf(),
+        })
 }
 
-fn lock_exclusive(path: &Path) -> Result<File, AppError> {
-    let file = File::open(path).map_err(|err| AppError::FileLock {
-        path: path.to_path_buf(),
-        source: err,
-    })?;
-    file.lock_exclusive().map_err(|err| AppError::FileLock {
-        path: path.to_path_buf(),
-        source: err,
-    })?;
-    Ok(file)
+fn subtitle_has_split_marker(path: &Path) -> Result<bool, AppError> {
+    let stem = path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .ok_or_else(|| AppError::PathStemNotUtf8 {
+            path: path.to_path_buf(),
+        })?;
+    Ok(video_parts::stem_contains_split_marker(stem))
+}
+
+fn build_subtitle_target_by_base(
+    subtitle_path: &Path,
+    target_base: &str,
+    target_dir: &Path,
+) -> Result<PathBuf, AppError> {
+    let extension = extension_string(subtitle_path)?;
+    let target_name = build_file_name(target_base, extension.as_deref());
+    Ok(target_dir.join(target_name))
 }
 
 struct MoveItem {

@@ -71,3 +71,18 @@ fn collect_ready_files_skips_seen_items() {
     assert!(ready.is_empty());
     assert!(!pending.contains_key(&path));
 }
+
+#[test]
+fn group_ready_files_merges_sibling_split_parts() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let first = dir.path().join("Movie-CD1.mkv");
+    let second = dir.path().join("Movie-CD2.mkv");
+    touch(&first);
+    touch(&second);
+
+    let ready = vec![first.clone()];
+    let mut groups = group_ready_files(&ready).expect("grouped");
+    groups[0].sort();
+    assert_eq!(groups.len(), 1);
+    assert_eq!(groups[0], vec![first, second]);
+}

@@ -12,8 +12,8 @@
 - [x] Support multi-source data aggregation.
 - [x] Allow configuring priority source per selected NFO fields.
 - [x] Allow configuring scripts with path glob patterns (e.g., `xxx/xxx/*.lua`, `xxx/**/*.lua`).
-- [ ] Support passing multiple input files in `file` mode for unified migration and naming of split parts.
-- [ ] Support auto-detecting split video parts in the same directory in `dir` and `watch` modes, then applying unified migration and naming.
+- [x] Support passing multiple input files in `file` mode for unified migration and naming of split parts.
+- [x] Support auto-detecting split video parts in the same directory in `dir` and `watch` modes, then applying unified migration and naming.
 - [ ] Support `tag` and other node-name mapping.
 
 ## weevil-lua

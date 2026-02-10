@@ -5,10 +5,7 @@ use std::path::{Path, PathBuf};
 use crate::errors::AppError;
 use crate::fetch_runtime;
 use crate::mode_params::{FetchModeParams, FileModeParams};
-
-const VIDEO_EXTENSIONS: &[&str] = &[
-    "mkv", "mp4", "avi", "mov", "m4v", "wmv", "flv", "webm", "ts", "m2ts", "mts", "mpg", "mpeg",
-];
+use crate::video_parts;
 
 pub(crate) fn run_dir_mode(
     input: &Path,
@@ -18,7 +15,8 @@ pub(crate) fn run_dir_mode(
 ) -> Result<(), AppError> {
     let mut files = scan_video_files(input, max_depth)?;
     files.sort();
-    fetch_runtime::run_batch_fetch(files, params, fetch)
+    let groups = video_parts::group_video_paths(&files)?;
+    fetch_runtime::run_batch_fetch(groups, params, fetch)
 }
 
 pub(crate) fn scan_video_files(input: &Path, max_depth: i32) -> Result<Vec<PathBuf>, AppError> {
@@ -95,14 +93,7 @@ fn should_descend(depth: usize, max_depth: Option<usize>) -> bool {
 }
 
 pub(crate) fn is_video_path(path: &Path) -> bool {
-    let extension = match path.extension().and_then(|value| value.to_str()) {
-        Some(value) => value,
-        None => return false,
-    };
-    let extension = extension.to_ascii_lowercase();
-    VIDEO_EXTENSIONS
-        .iter()
-        .any(|candidate| *candidate == extension)
+    video_parts::is_video_path(path)
 }
 
 #[cfg(test)]
