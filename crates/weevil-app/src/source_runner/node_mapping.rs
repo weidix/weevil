@@ -358,8 +358,8 @@ tag,中字,Chinese Subtitle
     fn apply_movie_dedupes_actor_by_mapped_name() {
         let mapper = NodeValueMapper::from_csv(
             r#"
-actor,Bob,Bob
-actor,Bob,Bob
+actor,爱丽丝,Alice
+actor,艾丽丝,Alice
 actor.role,主演,Lead
 "#,
         )
@@ -368,19 +368,19 @@ actor.role,主演,Lead
         let mut movie = Movie {
             actor: vec![
                 Actor {
-                    name: Some("Bob".to_string()),
+                    name: Some("爱丽丝".to_string()),
                     role: Some("主演".to_string()),
                     gender: None,
                     order: Some(1),
                 },
                 Actor {
-                    name: Some("Bob".to_string()),
+                    name: Some("艾丽丝".to_string()),
                     role: None,
                     gender: Some("female".to_string()),
                     order: Some(2),
                 },
                 Actor {
-                    name: Some("Alice".to_string()),
+                    name: Some("Bob".to_string()),
                     role: None,
                     gender: None,
                     order: Some(3),
@@ -392,11 +392,11 @@ actor.role,主演,Lead
         mapper.apply_movie(&mut movie);
 
         assert_eq!(movie.actor.len(), 2);
-        assert_eq!(movie.actor[0].name.as_deref(), Some("Bob"));
+        assert_eq!(movie.actor[0].name.as_deref(), Some("Alice"));
         assert_eq!(movie.actor[0].role.as_deref(), Some("Lead"));
         assert_eq!(movie.actor[0].gender.as_deref(), Some("female"));
         assert_eq!(movie.actor[0].order, Some(1));
-        assert_eq!(movie.actor[1].name.as_deref(), Some("Alice"));
+        assert_eq!(movie.actor[1].name.as_deref(), Some("Bob"));
         assert_eq!(movie.actor[1].order, Some(2));
     }
 

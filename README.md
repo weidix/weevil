@@ -230,8 +230,8 @@ node,from,to
 genre,剧情,Drama
 genre,ドラマ,Drama
 tag,中文字幕,Chinese Subtitle
-actor,Bob,Bob
-actor,Bob,Bob
+actor,爱丽丝,Alice
+actor,艾丽丝,Alice
 ```
 
 Notes:
