@@ -61,25 +61,14 @@ fn order_sources_for_group<'a>(
         return sources.iter().collect();
     }
 
-    let mut ordered = Vec::with_capacity(sources.len());
-    let mut used = vec![false; sources.len()];
+    let mut ordered = Vec::with_capacity(priorities.len());
 
     for alias in priorities {
-        for (index, source) in sources.iter().enumerate() {
-            if used[index] {
-                continue;
-            }
+        for source in sources {
             if source.alias == *alias {
                 ordered.push(source);
-                used[index] = true;
                 break;
             }
-        }
-    }
-
-    for (index, source) in sources.iter().enumerate() {
-        if !used[index] {
-            ordered.push(source);
         }
     }
 
@@ -312,6 +301,90 @@ images = ["source.c", "source.b"]
                 .as_ref()
                 .and_then(|thumb| thumb.value.as_deref()),
             Some("thumb-c.jpg")
+        );
+    }
+
+    #[test]
+    fn merge_sources_movie_configured_group_is_strict_to_listed_aliases() {
+        let sources = vec![
+            MergeSource {
+                alias: "source.a".to_string(),
+                movie: Movie {
+                    runtime: Some(100),
+                    ..Movie::default()
+                },
+            },
+            MergeSource {
+                alias: "source.b".to_string(),
+                movie: Movie {
+                    runtime: None,
+                    ..Movie::default()
+                },
+            },
+            MergeSource {
+                alias: "source.c".to_string(),
+                movie: Movie {
+                    runtime: Some(130),
+                    ..Movie::default()
+                },
+            },
+        ];
+
+        let mode: crate::source_priority::SourcePriorityConfig = toml::from_str(
+            r#"
+details = ["source.b"]
+"#,
+        )
+        .expect("priority config");
+        let priority = SourcePriority::from_mode_and_shared(Some(&mode), None);
+
+        let merged = merge_sources_movie(&sources, &priority, true);
+        assert_eq!(merged.runtime, None);
+    }
+
+    #[test]
+    fn merge_sources_movie_empty_group_uses_script_order() {
+        let sources = vec![
+            MergeSource {
+                alias: "source.a".to_string(),
+                movie: Movie {
+                    runtime: Some(100),
+                    thumb: Some(Thumb {
+                        value: Some("thumb-a.jpg".to_string()),
+                        ..Thumb::default()
+                    }),
+                    ..Movie::default()
+                },
+            },
+            MergeSource {
+                alias: "source.b".to_string(),
+                movie: Movie {
+                    runtime: Some(120),
+                    thumb: Some(Thumb {
+                        value: Some("thumb-b.jpg".to_string()),
+                        ..Thumb::default()
+                    }),
+                    ..Movie::default()
+                },
+            },
+        ];
+
+        let mode: crate::source_priority::SourcePriorityConfig = toml::from_str(
+            r#"
+images = ["source.b"]
+"#,
+        )
+        .expect("priority config");
+        let priority = SourcePriority::from_mode_and_shared(Some(&mode), None);
+
+        let merged = merge_sources_movie(&sources, &priority, true);
+        assert_eq!(merged.runtime, Some(100));
+        assert_eq!(
+            merged
+                .thumb
+                .as_ref()
+                .and_then(|thumb| thumb.value.as_deref()),
+            Some("thumb-b.jpg")
         );
     }
 }

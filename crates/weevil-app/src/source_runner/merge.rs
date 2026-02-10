@@ -126,6 +126,15 @@ fn merge_actors(target: &mut Vec<Actor>, incoming: Vec<Actor>) {
             target.push(actor);
         }
     }
+
+    reindex_actor_orders(target);
+}
+
+fn reindex_actor_orders(actors: &mut [Actor]) {
+    for (index, actor) in actors.iter_mut().enumerate() {
+        let next_order = u32::try_from(index + 1).unwrap_or(u32::MAX);
+        actor.order = Some(next_order);
+    }
 }
 
 fn merge_unique_ids(target: &mut Vec<UniqueId>, incoming: Vec<UniqueId>) {
@@ -168,15 +177,22 @@ fn find_rating_mut<'a>(ratings: &'a mut [Rating], incoming: &Rating) -> Option<&
 
 fn find_actor_mut<'a>(actors: &'a mut [Actor], incoming: &Actor) -> Option<&'a mut Actor> {
     let incoming_name = normalized_option(incoming.name.as_deref());
+    let mut same_name_index = None;
 
-    for actor in actors {
+    for (index, actor) in actors.iter().enumerate() {
         let current_name = normalized_option(actor.name.as_deref());
-        if current_name == incoming_name && actor.order == incoming.order {
-            return Some(actor);
+        if current_name != incoming_name {
+            continue;
+        }
+        if actor.order == incoming.order {
+            return actors.get_mut(index);
+        }
+        if same_name_index.is_none() && incoming_name.is_some() {
+            same_name_index = Some(index);
         }
     }
 
-    None
+    same_name_index.and_then(|index| actors.get_mut(index))
 }
 
 fn find_unique_id_mut<'a>(
@@ -405,6 +421,78 @@ mod tests {
         assert_eq!(
             fanart.thumb[0].preview,
             Some("fanart-b-preview.jpg".to_string())
+        );
+    }
+
+    #[test]
+    fn merge_movie_dedupes_actor_when_order_differs() {
+        let mut target = Movie {
+            actor: vec![
+                Actor {
+                    name: Some("Alice".to_string()),
+                    role: None,
+                    gender: None,
+                    order: Some(1),
+                },
+                Actor {
+                    name: Some("Bob".to_string()),
+                    role: Some("Lead".to_string()),
+                    gender: Some("female".to_string()),
+                    order: Some(2),
+                },
+                Actor {
+                    name: Some("Carol".to_string()),
+                    role: None,
+                    gender: None,
+                    order: Some(3),
+                },
+            ],
+            ..Movie::default()
+        };
+
+        let incoming = Movie {
+            actor: vec![
+                Actor {
+                    name: Some("Alice".to_string()),
+                    role: Some("Guest".to_string()),
+                    gender: None,
+                    order: Some(1),
+                },
+                Actor {
+                    name: Some("Dave".to_string()),
+                    role: None,
+                    gender: None,
+                    order: Some(2),
+                },
+                Actor {
+                    name: Some("Bob".to_string()),
+                    role: None,
+                    gender: None,
+                    order: Some(3),
+                },
+            ],
+            ..Movie::default()
+        };
+
+        merge_movie(&mut target, incoming);
+
+        assert_eq!(target.actor.len(), 4);
+        assert_eq!(target.actor[0].name.as_deref(), Some("Alice"));
+        assert_eq!(target.actor[0].role.as_deref(), Some("Guest"));
+        assert_eq!(target.actor[1].name.as_deref(), Some("Bob"));
+        assert_eq!(target.actor[1].role.as_deref(), Some("Lead"));
+        assert_eq!(target.actor[1].order, Some(2));
+        assert_eq!(target.actor[2].name.as_deref(), Some("Carol"));
+        assert_eq!(target.actor[2].order, Some(3));
+        assert_eq!(target.actor[3].name.as_deref(), Some("Dave"));
+        assert_eq!(target.actor[3].order, Some(4));
+        assert_eq!(
+            target
+                .actor
+                .iter()
+                .filter(|actor| actor.name.as_deref() == Some("Bob"))
+                .count(),
+            1
         );
     }
 }

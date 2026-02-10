@@ -205,8 +205,9 @@ cargo run -p weevil-app -- dir --max-depth 1
   - `details` fields: `title`, `originaltitle`, `sorttitle`, `year`, `premiered`, `runtime`, `director`, `credits`, `genre`, `tag`, `plot`, `outline`, `tagline`, `ratings`, `userrating`, `uniqueid`, `studio`, `country`, `set` (`name` / `overview`), `actor`, `trailer`, `fileinfo`, `dateadded`
   - `*` can be `shared`, `name`, `file`, `dir`, `watch`
   - group-level precedence remains `mode > shared`
-  - if `multi-source=true`, each group follows its own priority list and can fallback to later successful sources
-  - if `multi-source=false` and source-priority is configured, each group uses only the first successful source in its own sequence
+  - when a group list is configured (non-empty), that group only uses matched aliases from the list
+  - when a group list is empty, that group uses default script order
+  - if `multi-source=false` and source-priority is configured, each group uses only the first source in its selected sequence
   - if source-priority is not configured, behavior stays default script order
 
 ### 1) `name`
