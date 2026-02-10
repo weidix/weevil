@@ -20,6 +20,13 @@ multi-source = false # false: stop at first successful script; true: aggregate s
 save-images = false # download and save remote poster/fanart images locally
 multi-source-max-sources = 2 # stop after N successful sources when multi-source=true; 0 means unlimited
 
+[shared.source-priority]
+# Optional source priority by script alias
+# images: poster/fanart fields
+# details: title/runtime/premiered and most textual metadata
+images = ["source_primary", "source_secondary"]
+details = ["source_primary"]
+
 [name]
 # name mode output file path (NFO)
 output = "./output/name-mode.nfo"
@@ -28,6 +35,10 @@ output = "./output/name-mode.nfo"
 [file]
 # file mode-specific overrides (optional)
 # folder-multi = "hard-link"
+
+# [file.source-priority]
+# images = ["source_secondary", "source_primary"]
+# details = ["source_primary"]
 
 [dir]
 input = "./videos"

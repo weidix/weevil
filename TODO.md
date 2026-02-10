@@ -10,7 +10,7 @@
 - [x] Support saving images to local storage.
 - [x] Support multi-threaded fetching.
 - [x] Support multi-source data aggregation.
-- [ ] Allow configuring priority source per selected NFO fields.
+- [x] Allow configuring priority source per selected NFO fields.
 - [ ] Allow configuring scripts with path glob patterns (e.g., `xxx/xxx/*.lua`, `xxx/**/*.lua`).
 - [ ] Support passing multiple input files in `file` mode for unified migration and naming of split parts.
 - [ ] Support auto-detecting split video parts in the same directory in `dir` and `watch` modes, then applying unified migration and naming.

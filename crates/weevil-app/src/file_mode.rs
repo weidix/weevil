@@ -30,6 +30,7 @@ pub(crate) fn run_file_mode(input: &Path, params: &FileModeParams) -> Result<(),
         params.scripts(),
         params.multi_source(),
         params.multi_source_max_sources(),
+        params.source_priority(),
         input_name.as_str(),
         input_path.as_str(),
     )?;

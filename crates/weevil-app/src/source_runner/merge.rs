@@ -1,31 +1,39 @@
 use crate::nfo::{Actor, Fanart, Movie, Rating, Ratings, SetInfo, Thumb, UniqueId};
 
 pub(crate) fn merge_movie(target: &mut Movie, incoming: Movie) {
-    merge_option_string(&mut target.title, incoming.title);
-    merge_option_string(&mut target.originaltitle, incoming.originaltitle);
-    merge_option_string(&mut target.sorttitle, incoming.sorttitle);
+    merge_movie_details(target, &incoming);
+    merge_movie_images(target, &incoming);
+}
+
+pub(crate) fn merge_movie_details(target: &mut Movie, incoming: &Movie) {
+    merge_option_string(&mut target.title, incoming.title.clone());
+    merge_option_string(&mut target.originaltitle, incoming.originaltitle.clone());
+    merge_option_string(&mut target.sorttitle, incoming.sorttitle.clone());
     merge_option_copy(&mut target.year, incoming.year);
-    merge_option_string(&mut target.premiered, incoming.premiered);
+    merge_option_string(&mut target.premiered, incoming.premiered.clone());
     merge_option_copy(&mut target.runtime, incoming.runtime);
-    merge_option_string(&mut target.director, incoming.director);
-    merge_string_list(&mut target.credits, incoming.credits);
-    merge_string_list(&mut target.genre, incoming.genre);
-    merge_string_list(&mut target.tag, incoming.tag);
-    merge_option_string(&mut target.plot, incoming.plot);
-    merge_option_string(&mut target.outline, incoming.outline);
-    merge_option_string(&mut target.tagline, incoming.tagline);
-    merge_ratings(&mut target.ratings, incoming.ratings);
+    merge_option_string(&mut target.director, incoming.director.clone());
+    merge_string_list(&mut target.credits, incoming.credits.clone());
+    merge_string_list(&mut target.genre, incoming.genre.clone());
+    merge_string_list(&mut target.tag, incoming.tag.clone());
+    merge_option_string(&mut target.plot, incoming.plot.clone());
+    merge_option_string(&mut target.outline, incoming.outline.clone());
+    merge_option_string(&mut target.tagline, incoming.tagline.clone());
+    merge_ratings(&mut target.ratings, incoming.ratings.clone());
     merge_option_copy(&mut target.userrating, incoming.userrating);
-    merge_unique_ids(&mut target.uniqueid, incoming.uniqueid);
-    merge_thumb(&mut target.thumb, incoming.thumb);
-    merge_fanart(&mut target.fanart, incoming.fanart);
-    merge_option_string(&mut target.studio, incoming.studio);
-    merge_string_list(&mut target.country, incoming.country);
-    merge_set_info(&mut target.set_info, incoming.set_info);
-    merge_actors(&mut target.actor, incoming.actor);
-    merge_option_string(&mut target.trailer, incoming.trailer);
-    merge_option_string(&mut target.fileinfo, incoming.fileinfo);
-    merge_option_string(&mut target.dateadded, incoming.dateadded);
+    merge_unique_ids(&mut target.uniqueid, incoming.uniqueid.clone());
+    merge_option_string(&mut target.studio, incoming.studio.clone());
+    merge_string_list(&mut target.country, incoming.country.clone());
+    merge_set_info(&mut target.set_info, incoming.set_info.clone());
+    merge_actors(&mut target.actor, incoming.actor.clone());
+    merge_option_string(&mut target.trailer, incoming.trailer.clone());
+    merge_option_string(&mut target.fileinfo, incoming.fileinfo.clone());
+    merge_option_string(&mut target.dateadded, incoming.dateadded.clone());
+}
+
+pub(crate) fn merge_movie_images(target: &mut Movie, incoming: &Movie) {
+    merge_thumb(&mut target.thumb, incoming.thumb.clone());
+    merge_fanart(&mut target.fanart, incoming.fanart.clone());
 }
 
 fn merge_ratings(target: &mut Option<Ratings>, incoming: Option<Ratings>) {

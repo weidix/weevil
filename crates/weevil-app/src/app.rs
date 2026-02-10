@@ -16,6 +16,7 @@ use crate::file_mode;
 use crate::image_store::localize_movie_images;
 use crate::mode_params::{FetchModeParams, FileModeParams, MultiFolderStrategy};
 use crate::script_info;
+use crate::source_priority::SourcePriority;
 use crate::source_runner;
 use crate::watch_mode;
 
@@ -45,6 +46,7 @@ pub(crate) fn run() -> Result<(), AppError> {
                 resolved.multi_source,
                 resolved.save_images,
                 resolved.multi_source_max_sources,
+                &resolved.source_priority,
                 &resolved.output,
             )
         }
@@ -199,6 +201,7 @@ fn file_mode_params_from_config(resolved: ResolvedModeConfig) -> FileModeParams 
         resolved.multi_source,
         resolved.save_images,
         resolved.multi_source_max_sources,
+        resolved.source_priority,
     )
 }
 
@@ -229,6 +232,7 @@ mod config_mapping_tests {
             multi_source: true,
             save_images: true,
             multi_source_max_sources: 3,
+            source_priority: crate::source_priority::SourcePriority::default(),
         };
         let fetch = fetch_mode_params_from_config(resolved);
         assert_eq!(fetch.fetch_threads(), 0);
@@ -271,6 +275,7 @@ mod config_mapping_tests {
             multi_source: false,
             save_images: false,
             multi_source_max_sources: 2,
+            source_priority: crate::source_priority::SourcePriority::default(),
         };
 
         let deduped = dedupe_resolved_script_aliases(resolved).expect("dedupe scripts");
@@ -306,6 +311,7 @@ mod config_mapping_tests {
             multi_source: false,
             save_images: false,
             multi_source_max_sources: 2,
+            source_priority: crate::source_priority::SourcePriority::default(),
         };
 
         let deduped = dedupe_resolved_name_script_aliases(resolved).expect("dedupe scripts");
@@ -331,6 +337,7 @@ fn run_lua_nfo(
     multi_source: bool,
     save_images: bool,
     multi_source_max_sources: u32,
+    source_priority: &SourcePriority,
     output: &Path,
 ) -> Result<(), AppError> {
     let task = TaskContext::new("name");
@@ -341,6 +348,7 @@ fn run_lua_nfo(
             scripts,
             multi_source,
             multi_source_max_sources,
+            source_priority,
             name,
         )?;
         let output_dir = output.parent().unwrap_or_else(|| Path::new("."));
@@ -364,6 +372,7 @@ fn run_lua_nfo(
             scripts,
             multi_source,
             multi_source_max_sources,
+            source_priority,
             name,
         )?
     };

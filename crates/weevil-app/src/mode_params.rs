@@ -1,5 +1,7 @@
 use std::path::PathBuf;
 
+use crate::source_priority::SourcePriority;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum MultiFolderStrategy {
     HardLink,
@@ -16,6 +18,7 @@ pub(crate) struct FileModeParams {
     multi_source: bool,
     save_images: bool,
     multi_source_max_sources: u32,
+    source_priority: SourcePriority,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -64,6 +67,7 @@ impl FileModeParams {
         multi_source: bool,
         save_images: bool,
         multi_source_max_sources: u32,
+        source_priority: SourcePriority,
     ) -> Self {
         Self {
             scripts,
@@ -73,6 +77,7 @@ impl FileModeParams {
             multi_source,
             save_images,
             multi_source_max_sources,
+            source_priority,
         }
     }
 
@@ -102,5 +107,9 @@ impl FileModeParams {
 
     pub(crate) fn save_images(&self) -> bool {
         self.save_images
+    }
+
+    pub(crate) fn source_priority(&self) -> &SourcePriority {
+        &self.source_priority
     }
 }

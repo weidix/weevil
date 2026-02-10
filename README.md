@@ -109,12 +109,13 @@ CLI supports full options for each mode; config provides reusable defaults.
 Reusable defaults live in config (`weevil.toml`):
 
 - Shared defaults: `script`/`scripts`, `output`, `input-name-rule`, `folder-multi`, `max-depth`, `multi-source`, `save-images`, `multi-source-max-sources`
+  - Optional nested: `[shared.source-priority]` with `images` and `details`
 - Fetch scheduling defaults: `fetch-threads`, `throttle-same-script`, `script-throttle-base-ms`
 - Mode defaults:
-  - `[name]`: `script`/`scripts`, `output`, `multi-source`, `save-images`, `multi-source-max-sources`
-  - `[file]`: `script`/`scripts`, `output`, `input-name-rule`, `folder-multi`, `multi-source`, `save-images`, `multi-source-max-sources`
-  - `[dir]`: `input`, `script`/`scripts`, `output`, `input-name-rule`, `folder-multi`, `max-depth`, `fetch-threads`, `throttle-same-script`, `script-throttle-base-ms`, `multi-source`, `save-images`, `multi-source-max-sources`
-  - `[watch]`: `input`, `script`/`scripts`, `output`, `input-name-rule`, `folder-multi`, `max-depth`, `fetch-threads`, `throttle-same-script`, `script-throttle-base-ms`, `multi-source`, `save-images`, `multi-source-max-sources`
+  - `[name]`: `script`/`scripts`, `output`, `multi-source`, `save-images`, `multi-source-max-sources`, optional `[name.source-priority]`
+  - `[file]`: `script`/`scripts`, `output`, `input-name-rule`, `folder-multi`, `multi-source`, `save-images`, `multi-source-max-sources`, optional `[file.source-priority]`
+  - `[dir]`: `input`, `script`/`scripts`, `output`, `input-name-rule`, `folder-multi`, `max-depth`, `fetch-threads`, `throttle-same-script`, `script-throttle-base-ms`, `multi-source`, `save-images`, `multi-source-max-sources`, optional `[dir.source-priority]`
+  - `[watch]`: `input`, `script`/`scripts`, `output`, `input-name-rule`, `folder-multi`, `max-depth`, `fetch-threads`, `throttle-same-script`, `script-throttle-base-ms`, `multi-source`, `save-images`, `multi-source-max-sources`, optional `[watch.source-priority]`
 
 Config loading order:
 
@@ -137,6 +138,13 @@ script-throttle-base-ms = 1000
 multi-source = false
 save-images = false
 multi-source-max-sources = 2
+
+[shared.source-priority]
+# Optional per-field-group source priority (by script alias)
+# images: poster/fanart related fields
+# details: title/runtime/premiered and most textual metadata fields
+images = ["source.alpha", "source.alpha.mirror"]
+details = ["source.alpha"]
 
 [name]
 output = "./sample.nfo"
@@ -190,6 +198,16 @@ cargo run -p weevil-app -- dir --max-depth 1
 - `--throttle-same-script` is a boolean flag (default off); passing it enables same-script throttling.
 - `multi-source-max-sources=0` means no source-count limit.
 - Aggregation merges empty fields from later sources and combines `tag` / `genre` / `actor` / `fanart.thumb` / cross-platform `ratings` without duplicate entries.
+- Optional source-priority config for selected field groups:
+  - `[*.source-priority].images = ["alias_a", "alias_b"]`
+  - `[*.source-priority].details = ["alias_x", "alias_y"]`
+  - `images` fields: `thumb`, `fanart.thumb`
+  - `details` fields: `title`, `originaltitle`, `sorttitle`, `year`, `premiered`, `runtime`, `director`, `credits`, `genre`, `tag`, `plot`, `outline`, `tagline`, `ratings`, `userrating`, `uniqueid`, `studio`, `country`, `set` (`name` / `overview`), `actor`, `trailer`, `fileinfo`, `dateadded`
+  - `*` can be `shared`, `name`, `file`, `dir`, `watch`
+  - group-level precedence remains `mode > shared`
+  - if `multi-source=true`, each group follows its own priority list and can fallback to later successful sources
+  - if `multi-source=false` and source-priority is configured, each group uses only the first successful source in its own sequence
+  - if source-priority is not configured, behavior stays default script order
 
 ### 1) `name`
 

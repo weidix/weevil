@@ -5,6 +5,7 @@ use serde::Deserialize;
 
 use crate::cli::FolderMultiStrategy;
 use crate::errors::AppError;
+use crate::source_priority::{SourcePriority, SourcePriorityConfig};
 
 const DEFAULT_CONFIG_PATH: &str = "weevil.toml";
 
@@ -102,12 +103,18 @@ impl AppConfig {
             .or(self.shared.multi_source_max_sources)
             .unwrap_or(2);
 
+        let source_priority = SourcePriority::from_mode_and_shared(
+            self.name.source_priority.as_ref(),
+            self.shared.source_priority.as_ref(),
+        );
+
         Ok(ResolvedNameConfig {
             scripts,
             output,
             multi_source,
             save_images,
             multi_source_max_sources,
+            source_priority,
         })
     }
 
@@ -171,6 +178,7 @@ pub(crate) struct ResolvedNameConfig {
     pub(crate) multi_source: bool,
     pub(crate) save_images: bool,
     pub(crate) multi_source_max_sources: u32,
+    pub(crate) source_priority: SourcePriority,
 }
 
 #[derive(Debug, Clone)]
@@ -185,6 +193,7 @@ pub(crate) struct ResolvedModeConfig {
     pub(crate) multi_source: bool,
     pub(crate) save_images: bool,
     pub(crate) multi_source_max_sources: u32,
+    pub(crate) source_priority: SourcePriority,
 }
 
 #[derive(Debug, Clone)]
@@ -209,6 +218,7 @@ struct SharedConfig {
     multi_source: Option<bool>,
     save_images: Option<bool>,
     multi_source_max_sources: Option<u32>,
+    source_priority: Option<SourcePriorityConfig>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -220,6 +230,7 @@ struct NameConfig {
     multi_source: Option<bool>,
     save_images: Option<bool>,
     multi_source_max_sources: Option<u32>,
+    source_priority: Option<SourcePriorityConfig>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -237,6 +248,7 @@ struct ModeConfig {
     multi_source: Option<bool>,
     save_images: Option<bool>,
     multi_source_max_sources: Option<u32>,
+    source_priority: Option<SourcePriorityConfig>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -367,6 +379,11 @@ fn resolve_mode_config(
         .or(shared.multi_source_max_sources)
         .unwrap_or(2);
 
+    let source_priority = SourcePriority::from_mode_and_shared(
+        mode_config.source_priority.as_ref(),
+        shared.source_priority.as_ref(),
+    );
+
     Ok(ResolvedModeConfig {
         scripts,
         output,
@@ -378,6 +395,7 @@ fn resolve_mode_config(
         multi_source,
         save_images,
         multi_source_max_sources,
+        source_priority,
     })
 }
 
@@ -465,28 +483,15 @@ fn dedupe_paths(paths: Vec<PathBuf>) -> Vec<PathBuf> {
     deduped
 }
 
-#[cfg(test)]
-mod local_tests {
-    use super::*;
-
-    #[test]
-    fn dedupe_paths_keeps_first_order() {
-        let deduped = dedupe_paths(vec![
-            PathBuf::from("a.lua"),
-            PathBuf::from("b.lua"),
-            PathBuf::from("a.lua"),
-        ]);
-        assert_eq!(
-            deduped,
-            vec![PathBuf::from("a.lua"), PathBuf::from("b.lua")]
-        );
-    }
-}
-
 fn resolve_max_depth(mode: &ModeConfig, shared: &SharedConfig, cli: Option<i32>) -> i32 {
     cli.or(mode.max_depth).or(shared.max_depth).unwrap_or(-1)
 }
-
+#[cfg(test)]
+#[path = "tests/config_local.rs"]
+mod local_tests;
+#[cfg(test)]
+#[path = "tests/config_source_priority.rs"]
+mod source_priority_tests;
 #[cfg(test)]
 #[path = "tests/config.rs"]
 mod tests;

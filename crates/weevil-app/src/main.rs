@@ -10,6 +10,7 @@ mod logging;
 mod mode_params;
 mod nfo;
 mod script_info;
+mod source_priority;
 mod source_runner;
 mod watch_mode;
 

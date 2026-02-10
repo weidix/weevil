@@ -7,10 +7,13 @@ use weevil_lua::{LuaPlugin, TrustedUrl};
 
 use crate::errors::AppError;
 use crate::nfo::Movie;
+use crate::source_priority::SourcePriority;
 
 mod merge;
+mod priority_merge;
 
-pub(crate) use merge::merge_movie;
+pub(crate) use merge::{merge_movie, merge_movie_details, merge_movie_images};
+use priority_merge::{MergeSource, merge_sources_movie};
 
 pub(crate) struct FileScriptOutput {
     pub(crate) movie: Movie,
@@ -25,6 +28,7 @@ pub(crate) fn run_name_scripts(
     scripts: &[PathBuf],
     multi_source: bool,
     multi_source_max_sources: u32,
+    source_priority: &SourcePriority,
     name: &str,
 ) -> Result<String, AppError> {
     let output = run_name_scripts_output(
@@ -33,6 +37,7 @@ pub(crate) fn run_name_scripts(
         scripts,
         multi_source,
         multi_source_max_sources,
+        source_priority,
         name,
     )?;
     Ok(output.xml)
@@ -44,11 +49,16 @@ pub(crate) fn run_name_scripts_output(
     scripts: &[PathBuf],
     multi_source: bool,
     multi_source_max_sources: u32,
+    source_priority: &SourcePriority,
     name: &str,
 ) -> Result<FileScriptOutput, AppError> {
     let mut sources = Vec::new();
     let mut last_error = None;
-    let success_limit = success_limit(multi_source, multi_source_max_sources);
+    let success_limit = success_limit(
+        multi_source,
+        multi_source_max_sources,
+        source_priority.is_configured(),
+    );
 
     for script in scripts {
         match run_script(task_id, task_kind, script, ScriptCallArgs::Name { name }) {
@@ -68,10 +78,24 @@ pub(crate) fn run_name_scripts_output(
         return Err(last_error.unwrap_or_else(no_scripts_configured_error));
     }
 
-    let merged_sources = multi_source && sources.len() > 1;
+    let merged_sources =
+        should_merge_sources(multi_source, source_priority.is_configured(), sources.len());
     let mut first = sources.remove(0);
+    if merged_sources {
+        let mut merge_sources = Vec::with_capacity(sources.len() + 1);
+        merge_sources.push(MergeSource {
+            alias: first.alias.clone(),
+            movie: first.movie.clone(),
+        });
+        for source in &sources {
+            merge_sources.push(MergeSource {
+                alias: source.alias.clone(),
+                movie: source.movie.clone(),
+            });
+        }
+        first.movie = merge_sources_movie(&merge_sources, source_priority, multi_source);
+    }
     for source in sources {
-        merge_movie(&mut first.movie, source.movie);
         merge_trusted_urls(&mut first.trusted_urls, source.trusted_urls);
     }
 
@@ -95,12 +119,17 @@ pub(crate) fn run_file_scripts(
     scripts: &[PathBuf],
     multi_source: bool,
     multi_source_max_sources: u32,
+    source_priority: &SourcePriority,
     input_name: &str,
     input_path: &str,
 ) -> Result<FileScriptOutput, AppError> {
     let mut sources = Vec::new();
     let mut last_error = None;
-    let success_limit = success_limit(multi_source, multi_source_max_sources);
+    let success_limit = success_limit(
+        multi_source,
+        multi_source_max_sources,
+        source_priority.is_configured(),
+    );
 
     for script in scripts {
         match run_script(
@@ -128,10 +157,24 @@ pub(crate) fn run_file_scripts(
         return Err(last_error.unwrap_or_else(no_scripts_configured_error));
     }
 
-    let merged_sources = multi_source && sources.len() > 1;
+    let merged_sources =
+        should_merge_sources(multi_source, source_priority.is_configured(), sources.len());
     let mut first = sources.remove(0);
+    if merged_sources {
+        let mut merge_sources = Vec::with_capacity(sources.len() + 1);
+        merge_sources.push(MergeSource {
+            alias: first.alias.clone(),
+            movie: first.movie.clone(),
+        });
+        for source in &sources {
+            merge_sources.push(MergeSource {
+                alias: source.alias.clone(),
+                movie: source.movie.clone(),
+            });
+        }
+        first.movie = merge_sources_movie(&merge_sources, source_priority, multi_source);
+    }
     for source in sources {
-        merge_movie(&mut first.movie, source.movie);
         merge_trusted_urls(&mut first.trusted_urls, source.trusted_urls);
     }
 
@@ -169,7 +212,14 @@ pub(crate) fn render_nfo_output(value: Option<Value>, lua: &mlua::Lua) -> Result
     }
 }
 
-pub(crate) fn success_limit(multi_source: bool, multi_source_max_sources: u32) -> usize {
+pub(crate) fn success_limit(
+    multi_source: bool,
+    multi_source_max_sources: u32,
+    source_priority_configured: bool,
+) -> usize {
+    if source_priority_configured {
+        return usize::MAX;
+    }
     if !multi_source {
         return 1;
     }
@@ -177,6 +227,14 @@ pub(crate) fn success_limit(multi_source: bool, multi_source_max_sources: u32) -
         return usize::MAX;
     }
     usize::try_from(multi_source_max_sources).unwrap_or(usize::MAX)
+}
+
+fn should_merge_sources(
+    multi_source: bool,
+    source_priority_configured: bool,
+    source_count: usize,
+) -> bool {
+    source_count > 1 && (multi_source || source_priority_configured)
 }
 
 pub(crate) fn serialize_movie(movie: &Movie) -> Result<String, AppError> {
@@ -196,6 +254,7 @@ fn run_script(
     args: ScriptCallArgs<'_>,
 ) -> Result<ScriptSource, AppError> {
     let plugin = LuaPlugin::from_file(script).map_err(AppError::LuaPlugin)?;
+    let alias = plugin.alias().to_string();
     plugin.set_log_context(task_id.to_string(), task_kind);
 
     let value = match args {
@@ -211,6 +270,7 @@ fn run_script(
     let (movie, xml) = decode_script_output(value, plugin.lua())?;
 
     Ok(ScriptSource {
+        alias,
         movie,
         xml,
         trusted_urls: plugin.trusted_urls().to_vec(),
@@ -285,6 +345,7 @@ enum ScriptCallArgs<'a> {
 }
 
 struct ScriptSource {
+    alias: String,
     movie: Movie,
     xml: String,
     trusted_urls: Vec<TrustedUrl>,
@@ -296,11 +357,22 @@ mod tests {
 
     #[test]
     fn success_limit_defaults_to_one_without_multi_source() {
-        assert_eq!(success_limit(false, 5), 1);
+        assert_eq!(success_limit(false, 5, false), 1);
     }
 
     #[test]
     fn success_limit_zero_means_unlimited() {
-        assert_eq!(success_limit(true, 0), usize::MAX);
+        assert_eq!(success_limit(true, 0, false), usize::MAX);
+    }
+
+    #[test]
+    fn success_limit_priority_configured_means_unlimited() {
+        assert_eq!(success_limit(false, 1, true), usize::MAX);
+    }
+
+    #[test]
+    fn should_merge_sources_when_priority_configured() {
+        assert!(should_merge_sources(false, true, 2));
+        assert!(!should_merge_sources(false, true, 1));
     }
 }
