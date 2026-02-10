@@ -1,6 +1,7 @@
 use std::path::Path;
 
 use super::*;
+use tempfile::tempdir;
 
 #[test]
 fn load_default_when_missing_file() {
@@ -444,4 +445,51 @@ output = "library/{title}"
         .expect("resolved");
 
     assert!(!resolved.save_images);
+}
+
+#[test]
+fn resolve_file_mode_expands_script_glob_from_config() {
+    let dir = tempdir().expect("temp dir");
+    let scripts_dir = dir.path().join("scripts");
+    std::fs::create_dir_all(scripts_dir.join("nested")).expect("create scripts dir");
+
+    let alpha = scripts_dir.join("alpha.lua");
+    let beta = scripts_dir.join("nested").join("beta.lua");
+    std::fs::write(&alpha, "return {} ").expect("write alpha");
+    std::fs::write(&beta, "return {} ").expect("write beta");
+
+    let config: AppConfig = toml::from_str(&format!(
+        r#"
+[shared]
+scripts = ["{}/*.lua", "{}/**/*.lua"]
+output = "library/{{title}}"
+"#,
+        scripts_dir.display(),
+        scripts_dir.display()
+    ))
+    .expect("config");
+
+    let resolved = config
+        .resolve_file_mode_with(&ModeCliOverrides::default())
+        .expect("resolve config");
+
+    assert_eq!(resolved.scripts, vec![alpha, beta]);
+}
+
+#[test]
+fn resolve_file_mode_keeps_unmatched_glob_literal() {
+    let config: AppConfig = toml::from_str(
+        r#"
+[shared]
+scripts = "scripts/missing/*.lua"
+output = "library/{title}"
+"#,
+    )
+    .expect("config");
+
+    let resolved = config
+        .resolve_file_mode_with(&ModeCliOverrides::default())
+        .expect("resolve config");
+
+    assert_eq!(resolved.scripts, vec![Path::new("scripts/missing/*.lua")]);
 }

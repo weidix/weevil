@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use super::{AppConfig, StringPathList, dedupe_paths};
+use super::{AppConfig, StringPathList, dedupe_paths, expand_script_patterns};
 
 impl AppConfig {
     pub(crate) fn list_script_paths_for_info(&self) -> Vec<PathBuf> {
@@ -16,7 +16,7 @@ impl AppConfig {
             &self.watch.mode.scripts,
         );
 
-        dedupe_paths(scripts)
+        expand_script_patterns(dedupe_paths(scripts))
     }
 }
 
@@ -36,6 +36,8 @@ fn append_script_sources(
 
 #[cfg(test)]
 mod tests {
+    use tempfile::tempdir;
+
     use super::*;
 
     #[test]
@@ -76,5 +78,33 @@ scripts = ["scripts/watch.lua"]
                 PathBuf::from("scripts/watch.lua"),
             ]
         );
+    }
+
+    #[test]
+    fn list_script_paths_for_info_expands_glob_patterns() {
+        let dir = tempdir().expect("temp dir");
+        let scripts_dir = dir.path().join("scripts");
+        std::fs::create_dir_all(scripts_dir.join("nested")).expect("create scripts");
+
+        let alpha = scripts_dir.join("alpha.lua");
+        let beta = scripts_dir.join("nested").join("beta.lua");
+        let other = scripts_dir.join("nested").join("ignore.txt");
+
+        std::fs::write(&alpha, "return {} ").expect("write alpha");
+        std::fs::write(&beta, "return {} ").expect("write beta");
+        std::fs::write(&other, "ignore").expect("write txt");
+
+        let config: AppConfig = toml::from_str(&format!(
+            r#"
+[shared]
+scripts = ["{}/*.lua", "{}/**/*.lua"]
+"#,
+            scripts_dir.display(),
+            scripts_dir.display()
+        ))
+        .expect("config");
+
+        let scripts = config.list_script_paths_for_info();
+        assert_eq!(scripts, vec![alpha, beta]);
     }
 }

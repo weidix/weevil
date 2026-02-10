@@ -7,6 +7,8 @@ use crate::cli::FolderMultiStrategy;
 use crate::errors::AppError;
 use crate::source_priority::{SourcePriority, SourcePriorityConfig};
 
+use self::script_paths::{dedupe_paths, expand_script_patterns};
+
 const DEFAULT_CONFIG_PATH: &str = "weevil.toml";
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -411,14 +413,14 @@ impl AppConfig {
             .scripts
             .as_ref()
             .map(StringPathList::to_vec)
-            .map(dedupe_paths)
+            .map(expand_script_patterns)
             .filter(|scripts| !scripts.is_empty())
         {
             return scripts;
         }
 
         if let Some(script) = self.name.script.clone() {
-            return vec![script];
+            return expand_script_patterns(vec![script]);
         }
 
         if let Some(scripts) = self
@@ -426,13 +428,13 @@ impl AppConfig {
             .scripts
             .as_ref()
             .map(StringPathList::to_vec)
-            .map(dedupe_paths)
+            .map(expand_script_patterns)
             .filter(|scripts| !scripts.is_empty())
         {
             return scripts;
         }
 
-        self.shared.script.clone().into_iter().collect()
+        expand_script_patterns(self.shared.script.clone().into_iter().collect())
     }
 }
 
@@ -450,37 +452,30 @@ fn resolve_mode_scripts(
         .scripts
         .as_ref()
         .map(StringPathList::to_vec)
-        .map(dedupe_paths)
+        .map(expand_script_patterns)
         .filter(|scripts| !scripts.is_empty())
     {
         return Some(scripts);
     }
 
     if let Some(script) = mode_config.script.clone() {
-        return Some(vec![script]);
+        return Some(expand_script_patterns(vec![script]));
     }
 
     if let Some(scripts) = shared
         .scripts
         .as_ref()
         .map(StringPathList::to_vec)
-        .map(dedupe_paths)
+        .map(expand_script_patterns)
         .filter(|scripts| !scripts.is_empty())
     {
         return Some(scripts);
     }
 
-    shared.script.clone().map(|script| vec![script])
-}
-
-fn dedupe_paths(paths: Vec<PathBuf>) -> Vec<PathBuf> {
-    let mut deduped = Vec::new();
-    for path in paths {
-        if !deduped.contains(&path) {
-            deduped.push(path);
-        }
-    }
-    deduped
+    shared
+        .script
+        .clone()
+        .map(|script| expand_script_patterns(vec![script]))
 }
 
 fn resolve_max_depth(mode: &ModeConfig, shared: &SharedConfig, cli: Option<i32>) -> i32 {
@@ -497,3 +492,4 @@ mod source_priority_tests;
 mod tests;
 
 mod script_listing;
+mod script_paths;
