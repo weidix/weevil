@@ -474,16 +474,6 @@ Available in script as global `weevil`:
 
 Unsupported constructs return `QueryExecError` with feature category and hint.
 
-## Demo Assets
-
-- Sample Lua scripts and fixtures: `demo_lua/`
-  - `demo_lua/source_alpha/lua/source_alpha.lua`
-  - `demo_lua/source_beta/lua/source_beta.lua`
-  - `demo_lua/source_gamma/lua/source_gamma.lua`
-- Split-parts migration demo:
-  - `demo_lua/split_parts_example/lua/split_demo.lua`
-  - `demo_lua/split_parts_example/incoming/`
-
 ## Known Boundaries / Non-goals
 
 - No built-in website adapters in the Rust binary.
