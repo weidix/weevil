@@ -22,9 +22,11 @@ enum NodeValueMapperData {
 
 #[derive(Debug, Clone)]
 struct IndexedNodeValueMapper {
-    index: HashMap<u64, Vec<u64>>,
+    index: Vec<IndexedEntry>,
     file: Arc<Mutex<File>>,
 }
+
+type IndexedEntry = (u64, u64);
 
 impl Default for NodeValueMapper {
     fn default() -> Self {
@@ -87,7 +89,7 @@ impl NodeValueMapper {
 
     pub(crate) fn from_csv_file(file: File) -> Result<Self, String> {
         let mut reader = BufReader::new(file);
-        let mut index: HashMap<u64, Vec<u64>> = HashMap::new();
+        let mut index: Vec<IndexedEntry> = Vec::new();
         let mut first_data_row = true;
         let mut line_no = 0usize;
         let mut offset = 0u64;
@@ -149,9 +151,10 @@ impl NodeValueMapper {
             let node_key = normalize_key(node);
             let from_key = normalize_key(from);
             let key_hash = hash_key(node_key.as_str(), from_key.as_str());
-            index.entry(key_hash).or_default().push(line_offset);
+            index.push((key_hash, line_offset));
         }
 
+        index.sort_by_key(|(hash, _)| *hash);
         let file = reader.into_inner();
         Ok(Self {
             data: NodeValueMapperData::Indexed(IndexedNodeValueMapper {
@@ -352,8 +355,19 @@ fn merge_option_string(target: &mut Option<String>, incoming: Option<String>) {
 impl IndexedNodeValueMapper {
     fn map_value(&self, node_key: &str, value_key: &str) -> Option<String> {
         let key_hash = hash_key(node_key, value_key);
-        let offsets = self.index.get(&key_hash)?;
-        for offset in offsets.iter().rev() {
+        let entries = self.index.as_slice();
+        let pos = entries
+            .binary_search_by_key(&key_hash, |(hash, _)| *hash)
+            .ok()?;
+        let mut start = pos;
+        while start > 0 && entries[start - 1].0 == key_hash {
+            start -= 1;
+        }
+        let mut end = pos + 1;
+        while end < entries.len() && entries[end].0 == key_hash {
+            end += 1;
+        }
+        for (_, offset) in entries[start..end].iter().rev() {
             match self.read_value_at(*offset, node_key, value_key) {
                 Ok(Some(mapped)) => return Some(mapped),
                 Ok(None) => {}
