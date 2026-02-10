@@ -349,12 +349,12 @@ pub(crate) fn load_node_value_mapper(path: Option<&Path>) -> Result<NodeValueMap
         return Ok(NodeValueMapper::default());
     };
 
-    let content = fs::read_to_string(path).map_err(|source| AppError::FetchRuntime {
-        reason: format!("failed to read node mapping CSV {:?}: {source}", path),
+    let file = fs::File::open(path).map_err(|source| AppError::FetchRuntime {
+        reason: format!("failed to read node mapping CSV {path:?}: {source}"),
     })?;
 
-    NodeValueMapper::from_csv(content.as_str()).map_err(|reason| AppError::FetchRuntime {
-        reason: format!("failed to parse node mapping CSV {:?}: {reason}", path),
+    NodeValueMapper::from_csv_file(file).map_err(|reason| AppError::FetchRuntime {
+        reason: format!("failed to parse node mapping CSV {path:?}: {reason}"),
     })
 }
 
@@ -406,10 +406,20 @@ mod tests {
     fn load_node_value_mapper_loads_csv_file() {
         let dir = tempdir().expect("temp dir");
         let csv_path = dir.path().join("node-map.csv");
-        std::fs::write(&csv_path, "genre,剧情,Drama\n").expect("write csv");
+        std::fs::write(
+            &csv_path,
+            "node,from,to\ngenre,剧情,Drama\ngenre,剧情,Drama2\n",
+        )
+        .expect("write csv");
 
         let mapper = load_node_value_mapper(Some(csv_path.as_path())).expect("mapper");
         assert!(mapper.has_rules());
+        let mut movie = Movie {
+            genre: vec!["剧情".to_string()],
+            ..Movie::default()
+        };
+        mapper.apply_movie(&mut movie);
+        assert_eq!(movie.genre, vec!["Drama2".to_string()]);
     }
 
     #[test]

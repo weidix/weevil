@@ -1,13 +1,43 @@
+use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, HashSet};
+use std::fs::File;
+use std::hash::{Hash, Hasher};
+use std::io::{BufRead, BufReader, Seek, SeekFrom};
+use std::sync::{Arc, Mutex};
 
 use crate::nfo::{Actor, Movie};
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub(crate) struct NodeValueMapper {
-    rules: HashMap<String, HashMap<String, String>>,
+    data: NodeValueMapperData,
+}
+
+#[derive(Debug, Clone)]
+enum NodeValueMapperData {
+    InMemory {
+        rules: HashMap<String, HashMap<String, String>>,
+    },
+    Indexed(IndexedNodeValueMapper),
+}
+
+#[derive(Debug, Clone)]
+struct IndexedNodeValueMapper {
+    index: HashMap<u64, Vec<u64>>,
+    file: Arc<Mutex<File>>,
+}
+
+impl Default for NodeValueMapper {
+    fn default() -> Self {
+        Self {
+            data: NodeValueMapperData::InMemory {
+                rules: HashMap::new(),
+            },
+        }
+    }
 }
 
 impl NodeValueMapper {
+    #[cfg(test)]
     pub(crate) fn from_csv(content: &str) -> Result<Self, String> {
         let mut mapper = Self::default();
         let mut first_data_row = true;
@@ -22,9 +52,9 @@ impl NodeValueMapper {
             let columns = parse_csv_line(raw_line)
                 .map_err(|reason| format!("invalid CSV at line {line_no}: {reason}"))?;
             if columns.len() != 3 {
+                let len = columns.len();
                 return Err(format!(
-                    "invalid CSV at line {line_no}: expected 3 columns (node, from, to), got {}",
-                    columns.len()
+                    "invalid CSV at line {line_no}: expected 3 columns (node, from, to), got {len}"
                 ));
             }
 
@@ -55,8 +85,87 @@ impl NodeValueMapper {
         Ok(mapper)
     }
 
+    pub(crate) fn from_csv_file(file: File) -> Result<Self, String> {
+        let mut reader = BufReader::new(file);
+        let mut index: HashMap<u64, Vec<u64>> = HashMap::new();
+        let mut first_data_row = true;
+        let mut line_no = 0usize;
+        let mut offset = 0u64;
+        let mut line = String::new();
+
+        loop {
+            line.clear();
+            let next_line = line_no + 1;
+            let bytes = reader
+                .read_line(&mut line)
+                .map_err(|source| format!("failed to read CSV at line {next_line}: {source}"))?;
+            if bytes == 0 {
+                break;
+            }
+            line_no += 1;
+            let line_offset = offset;
+            let bytes_u64 = u64::try_from(bytes)
+                .map_err(|_| format!("CSV line {line_no} size {bytes} exceeds u64::MAX"))?;
+            offset = offset
+                .checked_add(bytes_u64)
+                .ok_or_else(|| format!("CSV offset overflow at line {line_no}"))?;
+
+            let raw_line = line.trim_end_matches(&['\n', '\r'][..]);
+            let trimmed = raw_line.trim();
+            if trimmed.is_empty() || trimmed.starts_with('#') {
+                continue;
+            }
+
+            let columns = parse_csv_line(raw_line)
+                .map_err(|reason| format!("invalid CSV at line {line_no}: {reason}"))?;
+            if columns.len() != 3 {
+                let len = columns.len();
+                return Err(format!(
+                    "invalid CSV at line {line_no}: expected 3 columns (node, from, to), got {len}"
+                ));
+            }
+
+            let node = columns[0].trim();
+            let from = columns[1].trim();
+            let to = columns[2].trim();
+
+            if first_data_row
+                && node.eq_ignore_ascii_case("node")
+                && from.eq_ignore_ascii_case("from")
+                && to.eq_ignore_ascii_case("to")
+            {
+                first_data_row = false;
+                continue;
+            }
+
+            first_data_row = false;
+
+            if node.is_empty() || from.is_empty() || to.is_empty() {
+                return Err(format!(
+                    "invalid CSV at line {line_no}: node/from/to must be non-empty"
+                ));
+            }
+
+            let node_key = normalize_key(node);
+            let from_key = normalize_key(from);
+            let key_hash = hash_key(node_key.as_str(), from_key.as_str());
+            index.entry(key_hash).or_default().push(line_offset);
+        }
+
+        let file = reader.into_inner();
+        Ok(Self {
+            data: NodeValueMapperData::Indexed(IndexedNodeValueMapper {
+                index,
+                file: Arc::new(Mutex::new(file)),
+            }),
+        })
+    }
+
     pub(crate) fn has_rules(&self) -> bool {
-        !self.rules.is_empty()
+        match &self.data {
+            NodeValueMapperData::InMemory { rules } => !rules.is_empty(),
+            NodeValueMapperData::Indexed(indexed) => !indexed.index.is_empty(),
+        }
     }
 
     pub(crate) fn apply_movie(&self, movie: &mut Movie) {
@@ -90,25 +199,31 @@ impl NodeValueMapper {
         map_actor_values(self, &mut movie.actor);
     }
 
+    #[cfg(test)]
     fn insert_rule(&mut self, node: &str, from: &str, to: &str) {
+        let NodeValueMapperData::InMemory { rules } = &mut self.data else {
+            unreachable!("node value mapper must be in-memory to insert rules");
+        };
         let node_key = normalize_key(node);
         let from_key = normalize_key(from);
         let target = to.trim().to_string();
 
-        self.rules
-            .entry(node_key)
-            .or_default()
-            .insert(from_key, target);
+        rules.entry(node_key).or_default().insert(from_key, target);
     }
 
     fn map_with_node(&self, node: &str, value: &str) -> Option<String> {
         let node_key = normalize_key(node);
         let value_key = normalize_key(value);
 
-        self.rules
-            .get(node_key.as_str())
-            .and_then(|node_rules| node_rules.get(value_key.as_str()))
-            .cloned()
+        match &self.data {
+            NodeValueMapperData::InMemory { rules } => rules
+                .get(node_key.as_str())
+                .and_then(|node_rules| node_rules.get(value_key.as_str()))
+                .cloned(),
+            NodeValueMapperData::Indexed(indexed) => {
+                indexed.map_value(node_key.as_str(), value_key.as_str())
+            }
+        }
     }
 
     fn map_value(&self, node: &str, value: &str) -> String {
@@ -234,6 +349,70 @@ fn merge_option_string(target: &mut Option<String>, incoming: Option<String>) {
     }
 }
 
+impl IndexedNodeValueMapper {
+    fn map_value(&self, node_key: &str, value_key: &str) -> Option<String> {
+        let key_hash = hash_key(node_key, value_key);
+        let offsets = self.index.get(&key_hash)?;
+        for offset in offsets.iter().rev() {
+            match self.read_value_at(*offset, node_key, value_key) {
+                Ok(Some(mapped)) => return Some(mapped),
+                Ok(None) => {}
+                Err(reason) => panic!("node mapping CSV lookup failed: {reason}"),
+            }
+        }
+        None
+    }
+
+    fn read_value_at(
+        &self,
+        offset: u64,
+        node_key: &str,
+        value_key: &str,
+    ) -> Result<Option<String>, String> {
+        let mut file = self
+            .file
+            .lock()
+            .map_err(|_| "node mapping CSV lock poisoned".to_string())?;
+        file.seek(SeekFrom::Start(offset))
+            .map_err(|source| format!("failed to seek CSV to offset {offset}: {source}"))?;
+
+        let mut reader = BufReader::new(&mut *file);
+        let mut line = String::new();
+        let bytes = reader
+            .read_line(&mut line)
+            .map_err(|source| format!("failed to read CSV at offset {offset}: {source}"))?;
+        if bytes == 0 {
+            return Ok(None);
+        }
+
+        let raw_line = line.trim_end_matches(&['\n', '\r'][..]);
+        let columns = parse_csv_line(raw_line)
+            .map_err(|reason| format!("invalid CSV at offset {offset}: {reason}"))?;
+        if columns.len() != 3 {
+            let len = columns.len();
+            return Err(format!(
+                "invalid CSV at offset {offset}: expected 3 columns (node, from, to), got {len}"
+            ));
+        }
+
+        let node = columns[0].trim();
+        let from = columns[1].trim();
+        let to = columns[2].trim();
+
+        if node.is_empty() || from.is_empty() || to.is_empty() {
+            return Err(format!(
+                "invalid CSV at offset {offset}: node/from/to must be non-empty"
+            ));
+        }
+
+        if normalize_key(node) == node_key && normalize_key(from) == value_key {
+            return Ok(Some(to.trim().to_string()));
+        }
+
+        Ok(None)
+    }
+}
+
 fn parse_csv_line(line: &str) -> Result<Vec<String>, String> {
     let mut values = Vec::new();
     let mut buffer = String::new();
@@ -278,6 +457,14 @@ fn normalize_key(value: &str) -> String {
     value.trim().to_ascii_lowercase()
 }
 
+fn hash_key(node_key: &str, value_key: &str) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    node_key.hash(&mut hasher);
+    0u8.hash(&mut hasher);
+    value_key.hash(&mut hasher);
+    hasher.finish()
+}
+
 fn normalize_optional_key(value: Option<&str>) -> Option<String> {
     value.and_then(|current| {
         let key = normalize_key(current);
@@ -290,138 +477,5 @@ fn has_content(value: &str) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parse_csv_accepts_header_and_comments() {
-        let mapper = NodeValueMapper::from_csv(
-            r#"
-# comment line
-node,from,to
-genre,剧情,Drama
-tag,中字,Chinese Subtitle
-"actor","Alice A.",Alice
-"#,
-        )
-        .expect("mapper");
-
-        assert!(mapper.has_rules());
-        assert_eq!(mapper.map_value("genre", "剧情"), "Drama");
-        assert_eq!(mapper.map_value("tag", "中字"), "Chinese Subtitle");
-        assert_eq!(mapper.map_value("actor", "Alice A."), "Alice");
-    }
-
-    #[test]
-    fn parse_csv_rejects_invalid_column_count() {
-        let error = NodeValueMapper::from_csv("genre,action")
-            .expect_err("should reject invalid column count");
-        assert!(error.contains("expected 3 columns"));
-    }
-
-    #[test]
-    fn apply_movie_maps_and_dedupes_genre_and_tag() {
-        let mapper = NodeValueMapper::from_csv(
-            r#"
-genre,剧情,Drama
-genre,drama,Drama
-tag,中文字幕,Chinese Subtitle
-tag,中字,Chinese Subtitle
-"#,
-        )
-        .expect("mapper");
-
-        let mut movie = Movie {
-            genre: vec![
-                "剧情".to_string(),
-                "drama".to_string(),
-                "Action".to_string(),
-            ],
-            tag: vec![
-                "中文字幕".to_string(),
-                "中字".to_string(),
-                "Uncut".to_string(),
-            ],
-            ..Movie::default()
-        };
-
-        mapper.apply_movie(&mut movie);
-
-        assert_eq!(movie.genre, vec!["Drama".to_string(), "Action".to_string()]);
-        assert_eq!(
-            movie.tag,
-            vec!["Chinese Subtitle".to_string(), "Uncut".to_string()]
-        );
-    }
-
-    #[test]
-    fn apply_movie_dedupes_actor_by_mapped_name() {
-        let mapper = NodeValueMapper::from_csv(
-            r#"
-actor,爱丽丝,Alice
-actor,艾丽丝,Alice
-actor.role,主演,Lead
-"#,
-        )
-        .expect("mapper");
-
-        let mut movie = Movie {
-            actor: vec![
-                Actor {
-                    name: Some("爱丽丝".to_string()),
-                    role: Some("主演".to_string()),
-                    gender: None,
-                    order: Some(1),
-                },
-                Actor {
-                    name: Some("艾丽丝".to_string()),
-                    role: None,
-                    gender: Some("female".to_string()),
-                    order: Some(2),
-                },
-                Actor {
-                    name: Some("Bob".to_string()),
-                    role: None,
-                    gender: None,
-                    order: Some(3),
-                },
-            ],
-            ..Movie::default()
-        };
-
-        mapper.apply_movie(&mut movie);
-
-        assert_eq!(movie.actor.len(), 2);
-        assert_eq!(movie.actor[0].name.as_deref(), Some("Alice"));
-        assert_eq!(movie.actor[0].role.as_deref(), Some("Lead"));
-        assert_eq!(movie.actor[0].gender.as_deref(), Some("female"));
-        assert_eq!(movie.actor[0].order, Some(1));
-        assert_eq!(movie.actor[1].name.as_deref(), Some("Bob"));
-        assert_eq!(movie.actor[1].order, Some(2));
-    }
-
-    #[test]
-    fn apply_movie_maps_set_fields() {
-        let mapper = NodeValueMapper::from_csv(
-            r#"
-set.name,合集A,Collection A
-set.overview,说明A,Overview A
-"#,
-        )
-        .expect("mapper");
-
-        let mut movie = Movie {
-            set_info: Some(crate::nfo::SetInfo {
-                name: Some("合集A".to_string()),
-                overview: Some("说明A".to_string()),
-            }),
-            ..Movie::default()
-        };
-
-        mapper.apply_movie(&mut movie);
-
-        let set = movie.set_info.expect("set");
-        assert_eq!(set.name.as_deref(), Some("Collection A"));
-        assert_eq!(set.overview.as_deref(), Some("Overview A"));
-    }
-}
+#[path = "../tests/node_mapping.rs"]
+mod tests;
