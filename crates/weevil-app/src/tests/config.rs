@@ -262,6 +262,7 @@ folder-multi = "hard-link"
             multi_source: Some(true),
             save_images: Some(true),
             multi_source_max_sources: Some(3),
+            node_mapping_csv: None,
         })
         .expect("expected resolved config");
 
@@ -307,6 +308,7 @@ max-depth = 2
                 multi_source: Some(true),
                 save_images: Some(true),
                 multi_source_max_sources: Some(4),
+                node_mapping_csv: None,
             },
             max_depth: Some(1),
         })
@@ -374,6 +376,7 @@ output = "from-name-config.nfo"
             multi_source: Some(true),
             save_images: Some(true),
             multi_source_max_sources: Some(5),
+            node_mapping_csv: None,
         })
         .expect("expected resolved name");
 
@@ -427,6 +430,60 @@ multi-source-max-sources = 6
     assert!(resolved.multi_source);
     assert!(resolved.save_images);
     assert_eq!(resolved.multi_source_max_sources, 6);
+}
+
+#[test]
+fn resolve_mode_node_mapping_csv_uses_cli_over_config() {
+    let config: AppConfig = toml::from_str(
+        r#"
+[shared]
+script = "scripts/shared.lua"
+output = "library/{title}"
+node-mapping-csv = "maps/shared.csv"
+
+[file]
+node-mapping-csv = "maps/file.csv"
+"#,
+    )
+    .expect("expected config");
+
+    let resolved = config
+        .resolve_file_mode_with(&ModeCliOverrides {
+            node_mapping_csv: Some("maps/cli.csv".into()),
+            ..ModeCliOverrides::default()
+        })
+        .expect("resolved");
+
+    assert_eq!(
+        resolved.node_mapping_csv,
+        Some(Path::new("maps/cli.csv").to_path_buf())
+    );
+}
+
+#[test]
+fn resolve_name_node_mapping_csv_uses_mode_then_shared() {
+    let config: AppConfig = toml::from_str(
+        r#"
+[shared]
+script = "scripts/shared.lua"
+output = "shared.nfo"
+node-mapping-csv = "maps/shared.csv"
+
+[name]
+output = "name.nfo"
+node-mapping-csv = "maps/name.csv"
+"#,
+    )
+    .expect("expected config");
+
+    let resolved = config
+        .resolve_name_with(&NameCliOverrides::default())
+        .expect("resolved");
+
+    assert_eq!(
+        resolved.node_mapping_csv,
+        Some(Path::new("maps/name.csv").to_path_buf())
+    );
 }
 
 #[test]

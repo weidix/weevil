@@ -1,3 +1,4 @@
+use std::fs;
 use std::path::{Path, PathBuf};
 
 use mlua::{LuaSerdeExt, Value};
@@ -10,9 +11,11 @@ use crate::nfo::Movie;
 use crate::source_priority::SourcePriority;
 
 mod merge;
+mod node_mapping;
 mod priority_merge;
 
 pub(crate) use merge::{merge_movie, merge_movie_details, merge_movie_images};
+pub(crate) use node_mapping::NodeValueMapper;
 use priority_merge::{MergeSource, merge_sources_movie};
 
 pub(crate) struct FileScriptOutput {
@@ -29,6 +32,7 @@ pub(crate) fn run_name_scripts(
     multi_source: bool,
     multi_source_max_sources: u32,
     source_priority: &SourcePriority,
+    mapper: &NodeValueMapper,
     name: &str,
 ) -> Result<String, AppError> {
     let output = run_name_scripts_output(
@@ -38,6 +42,7 @@ pub(crate) fn run_name_scripts(
         multi_source,
         multi_source_max_sources,
         source_priority,
+        mapper,
         name,
     )?;
     Ok(output.xml)
@@ -50,6 +55,7 @@ pub(crate) fn run_name_scripts_output(
     multi_source: bool,
     multi_source_max_sources: u32,
     source_priority: &SourcePriority,
+    mapper: &NodeValueMapper,
     name: &str,
 ) -> Result<FileScriptOutput, AppError> {
     let mut sources = Vec::new();
@@ -99,7 +105,9 @@ pub(crate) fn run_name_scripts_output(
         merge_trusted_urls(&mut first.trusted_urls, source.trusted_urls);
     }
 
-    let xml = if merged_sources {
+    mapper.apply_movie(&mut first.movie);
+
+    let xml = if merged_sources || mapper.has_rules() {
         serialize_movie(&first.movie)?
     } else {
         first.xml
@@ -120,6 +128,7 @@ pub(crate) fn run_file_scripts(
     multi_source: bool,
     multi_source_max_sources: u32,
     source_priority: &SourcePriority,
+    mapper: &NodeValueMapper,
     input_name: &str,
     input_path: &str,
 ) -> Result<FileScriptOutput, AppError> {
@@ -178,7 +187,9 @@ pub(crate) fn run_file_scripts(
         merge_trusted_urls(&mut first.trusted_urls, source.trusted_urls);
     }
 
-    let xml = if merged_sources {
+    mapper.apply_movie(&mut first.movie);
+
+    let xml = if merged_sources || mapper.has_rules() {
         serialize_movie(&first.movie)?
     } else {
         first.xml
@@ -333,6 +344,20 @@ fn no_scripts_configured_error() -> AppError {
     }
 }
 
+pub(crate) fn load_node_value_mapper(path: Option<&Path>) -> Result<NodeValueMapper, AppError> {
+    let Some(path) = path else {
+        return Ok(NodeValueMapper::default());
+    };
+
+    let content = fs::read_to_string(path).map_err(|source| AppError::FetchRuntime {
+        reason: format!("failed to read node mapping CSV {:?}: {source}", path),
+    })?;
+
+    NodeValueMapper::from_csv(content.as_str()).map_err(|reason| AppError::FetchRuntime {
+        reason: format!("failed to parse node mapping CSV {:?}: {reason}", path),
+    })
+}
+
 #[derive(Clone, Copy)]
 enum ScriptCallArgs<'a> {
     Name {
@@ -354,6 +379,7 @@ struct ScriptSource {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::tempdir;
 
     #[test]
     fn success_limit_defaults_to_one_without_multi_source() {
@@ -374,5 +400,31 @@ mod tests {
     fn should_merge_sources_when_priority_configured() {
         assert!(should_merge_sources(false, true, 2));
         assert!(!should_merge_sources(false, true, 1));
+    }
+
+    #[test]
+    fn load_node_value_mapper_loads_csv_file() {
+        let dir = tempdir().expect("temp dir");
+        let csv_path = dir.path().join("node-map.csv");
+        std::fs::write(&csv_path, "genre,剧情,Drama\n").expect("write csv");
+
+        let mapper = load_node_value_mapper(Some(csv_path.as_path())).expect("mapper");
+        assert!(mapper.has_rules());
+    }
+
+    #[test]
+    fn load_node_value_mapper_returns_empty_when_missing_path() {
+        let mapper = load_node_value_mapper(None).expect("mapper");
+        assert!(!mapper.has_rules());
+    }
+
+    #[test]
+    fn load_node_value_mapper_rejects_invalid_csv() {
+        let dir = tempdir().expect("temp dir");
+        let csv_path = dir.path().join("node-map.csv");
+        std::fs::write(&csv_path, "genre,only-two\n").expect("write csv");
+
+        let error = load_node_value_mapper(Some(csv_path.as_path())).expect_err("invalid");
+        assert!(matches!(error, AppError::FetchRuntime { .. }));
     }
 }

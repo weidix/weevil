@@ -23,6 +23,7 @@ use crate::watch_mode;
 pub(crate) fn run() -> Result<(), AppError> {
     let cli = Cli::try_parse().map_err(AppError::Cli)?;
     let config = AppConfig::load(cli.config.as_deref())?;
+    let cli_node_mapping_csv = cli.node_mapping_csv.clone();
     match cli.command {
         Command::Name {
             name,
@@ -38,6 +39,7 @@ pub(crate) fn run() -> Result<(), AppError> {
                 multi_source: flag_override(multi_source),
                 save_images: flag_override(save_images),
                 multi_source_max_sources,
+                node_mapping_csv: cli_node_mapping_csv.clone(),
             })?;
             let resolved = dedupe_resolved_name_script_aliases(resolved)?;
             run_lua_nfo(
@@ -47,6 +49,7 @@ pub(crate) fn run() -> Result<(), AppError> {
                 resolved.save_images,
                 resolved.multi_source_max_sources,
                 &resolved.source_priority,
+                resolved.node_mapping_csv.as_deref(),
                 &resolved.output,
             )
         }
@@ -76,9 +79,10 @@ pub(crate) fn run() -> Result<(), AppError> {
                 multi_source: flag_override(multi_source),
                 save_images: flag_override(save_images),
                 multi_source_max_sources,
+                node_mapping_csv: cli_node_mapping_csv.clone(),
             })?;
             let resolved = dedupe_resolved_script_aliases(resolved)?;
-            let params = file_mode_params_from_config(resolved);
+            let params = file_mode_params_from_config(resolved)?;
             file_mode::run_file_mode_inputs(&input, &params)
         }
         Command::Dir {
@@ -108,13 +112,14 @@ pub(crate) fn run() -> Result<(), AppError> {
                     multi_source: flag_override(multi_source),
                     save_images: flag_override(save_images),
                     multi_source_max_sources,
+                    node_mapping_csv: cli_node_mapping_csv.clone(),
                 },
                 max_depth,
             })?;
             let input = resolved.input;
             let max_depth = resolved.max_depth;
             let mode = dedupe_resolved_script_aliases(resolved.mode)?;
-            let params = file_mode_params_from_config(mode.clone());
+            let params = file_mode_params_from_config(mode.clone())?;
             let fetch = fetch_mode_params_from_config(mode);
             dir_mode::run_dir_mode(&input, &params, &fetch, max_depth)
         }
@@ -145,13 +150,14 @@ pub(crate) fn run() -> Result<(), AppError> {
                     multi_source: flag_override(multi_source),
                     save_images: flag_override(save_images),
                     multi_source_max_sources,
+                    node_mapping_csv: cli_node_mapping_csv.clone(),
                 },
                 max_depth,
             })?;
             let input = resolved.input;
             let max_depth = resolved.max_depth;
             let mode = dedupe_resolved_script_aliases(resolved.mode)?;
-            let params = file_mode_params_from_config(mode.clone());
+            let params = file_mode_params_from_config(mode.clone())?;
             let fetch = fetch_mode_params_from_config(mode);
             watch_mode::run_watch_mode(&input, &params, &fetch, max_depth)
         }
@@ -197,8 +203,10 @@ fn dedupe_script_aliases_with_warning(
     Ok(deduped)
 }
 
-fn file_mode_params_from_config(resolved: ResolvedModeConfig) -> FileModeParams {
-    FileModeParams::new(
+fn file_mode_params_from_config(resolved: ResolvedModeConfig) -> Result<FileModeParams, AppError> {
+    let mapper = source_runner::load_node_value_mapper(resolved.node_mapping_csv.as_deref())?;
+
+    Ok(FileModeParams::new(
         resolved.scripts,
         resolved.output,
         resolved.input_name_rules,
@@ -207,7 +215,8 @@ fn file_mode_params_from_config(resolved: ResolvedModeConfig) -> FileModeParams 
         resolved.save_images,
         resolved.multi_source_max_sources,
         resolved.source_priority,
-    )
+        mapper,
+    ))
 }
 
 fn fetch_mode_params_from_config(resolved: ResolvedModeConfig) -> FetchModeParams {
@@ -238,6 +247,7 @@ mod config_mapping_tests {
             save_images: true,
             multi_source_max_sources: 3,
             source_priority: crate::source_priority::SourcePriority::default(),
+            node_mapping_csv: None,
         };
         let fetch = fetch_mode_params_from_config(resolved);
         assert_eq!(fetch.fetch_threads(), 0);
@@ -281,6 +291,7 @@ mod config_mapping_tests {
             save_images: false,
             multi_source_max_sources: 2,
             source_priority: crate::source_priority::SourcePriority::default(),
+            node_mapping_csv: None,
         };
 
         let deduped = dedupe_resolved_script_aliases(resolved).expect("dedupe scripts");
@@ -317,6 +328,7 @@ mod config_mapping_tests {
             save_images: false,
             multi_source_max_sources: 2,
             source_priority: crate::source_priority::SourcePriority::default(),
+            node_mapping_csv: None,
         };
 
         let deduped = dedupe_resolved_name_script_aliases(resolved).expect("dedupe scripts");
@@ -343,9 +355,11 @@ fn run_lua_nfo(
     save_images: bool,
     multi_source_max_sources: u32,
     source_priority: &SourcePriority,
+    node_mapping_csv: Option<&Path>,
     output: &Path,
 ) -> Result<(), AppError> {
     let task = TaskContext::new("name");
+    let mapper = source_runner::load_node_value_mapper(node_mapping_csv)?;
     let xml = if save_images {
         let mut source_output = source_runner::run_name_scripts_output(
             &task.id,
@@ -354,6 +368,7 @@ fn run_lua_nfo(
             multi_source,
             multi_source_max_sources,
             source_priority,
+            &mapper,
             name,
         )?;
         let output_dir = output.parent().unwrap_or_else(|| Path::new("."));
@@ -378,6 +393,7 @@ fn run_lua_nfo(
             multi_source,
             multi_source_max_sources,
             source_priority,
+            &mapper,
             name,
         )?
     };

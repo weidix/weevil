@@ -37,6 +37,25 @@ fn parse_name_command() {
 }
 
 #[test]
+fn parse_global_node_mapping_csv() {
+    let cli = Cli::try_parse_from([
+        "weevil",
+        "--node-mapping-csv",
+        "maps/node.csv",
+        "name",
+        "--name",
+        "Spirited Away",
+        "--script",
+        "script.lua",
+        "--output",
+        "movie.nfo",
+    ])
+    .expect("expected command");
+
+    assert_eq!(cli.node_mapping_csv, Some(PathBuf::from("maps/node.csv")));
+}
+
+#[test]
 fn parse_name_multi_scripts_and_multi_source() {
     let cli = Cli::try_parse_from([
         "weevil",

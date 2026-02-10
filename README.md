@@ -110,14 +110,14 @@ CLI supports full options for each mode; config provides reusable defaults.
 
 Reusable defaults live in config (`weevil.toml`):
 
-- Shared defaults: `script`/`scripts`, `output`, `input-name-rule`, `folder-multi`, `max-depth`, `multi-source`, `save-images`, `multi-source-max-sources`
+- Shared defaults: `script`/`scripts`, `output`, `input-name-rule`, `folder-multi`, `max-depth`, `multi-source`, `save-images`, `multi-source-max-sources`, `node-mapping-csv`
   - Optional nested: `[shared.source-priority]` with `images` and `details`
 - Fetch scheduling defaults: `fetch-threads`, `throttle-same-script`, `script-throttle-base-ms`
 - Mode defaults:
-  - `[name]`: `script`/`scripts`, `output`, `multi-source`, `save-images`, `multi-source-max-sources`, optional `[name.source-priority]`
-  - `[file]`: `script`/`scripts`, `output`, `input-name-rule`, `folder-multi`, `multi-source`, `save-images`, `multi-source-max-sources`, optional `[file.source-priority]`
-  - `[dir]`: `input`, `script`/`scripts`, `output`, `input-name-rule`, `folder-multi`, `max-depth`, `fetch-threads`, `throttle-same-script`, `script-throttle-base-ms`, `multi-source`, `save-images`, `multi-source-max-sources`, optional `[dir.source-priority]`
-  - `[watch]`: `input`, `script`/`scripts`, `output`, `input-name-rule`, `folder-multi`, `max-depth`, `fetch-threads`, `throttle-same-script`, `script-throttle-base-ms`, `multi-source`, `save-images`, `multi-source-max-sources`, optional `[watch.source-priority]`
+  - `[name]`: `script`/`scripts`, `output`, `multi-source`, `save-images`, `multi-source-max-sources`, `node-mapping-csv`, optional `[name.source-priority]`
+  - `[file]`: `script`/`scripts`, `output`, `input-name-rule`, `folder-multi`, `multi-source`, `save-images`, `multi-source-max-sources`, `node-mapping-csv`, optional `[file.source-priority]`
+  - `[dir]`: `input`, `script`/`scripts`, `output`, `input-name-rule`, `folder-multi`, `max-depth`, `fetch-threads`, `throttle-same-script`, `script-throttle-base-ms`, `multi-source`, `save-images`, `multi-source-max-sources`, `node-mapping-csv`, optional `[dir.source-priority]`
+  - `[watch]`: `input`, `script`/`scripts`, `output`, `input-name-rule`, `folder-multi`, `max-depth`, `fetch-threads`, `throttle-same-script`, `script-throttle-base-ms`, `multi-source`, `save-images`, `multi-source-max-sources`, `node-mapping-csv`, optional `[watch.source-priority]`
 
 Config loading order:
 
@@ -140,6 +140,7 @@ script-throttle-base-ms = 1000
 multi-source = false
 save-images = false
 multi-source-max-sources = 2
+node-mapping-csv = "./node_mapping.csv"
 
 [shared.source-priority]
 # Optional per-field-group source priority (by script alias)
@@ -200,6 +201,8 @@ cargo run -p weevil-app -- dir --max-depth 1
 - `--throttle-same-script` is a boolean flag (default off); passing it enables same-script throttling.
 - `multi-source-max-sources=0` means no source-count limit.
 - Aggregation merges empty fields from later sources and combines `tag` / `genre` / `actor` / `fanart.thumb` / cross-platform `ratings` without duplicate entries.
+- `--node-mapping-csv` (or `node-mapping-csv` in config) applies CSV value mapping before final output.
+- Mapping supports `many-to-one` rules; final dedupe uses mapped values (especially useful for `genre`, `tag`, and `actor`).
 - Optional source-priority config for selected field groups:
   - `[*.source-priority].images = ["alias_a", "alias_b"]`
   - `[*.source-priority].details = ["alias_x", "alias_y"]`
@@ -211,6 +214,31 @@ cargo run -p weevil-app -- dir --max-depth 1
   - when a group list is empty, that group uses default script order
   - if `multi-source=false` and source-priority is configured, each group uses only the first source in its selected sequence
   - if source-priority is not configured, behavior stays default script order
+
+### Node Mapping CSV
+
+`node-mapping-csv` expects UTF-8 CSV with 3 columns:
+
+- `node,from,to`
+- optional header row (`node,from,to`)
+- lines starting with `#` are ignored
+
+Example:
+
+```csv
+node,from,to
+genre,剧情,Drama
+genre,ドラマ,Drama
+tag,中文字幕,Chinese Subtitle
+actor,Bob,Bob
+actor,Bob,Bob
+```
+
+Notes:
+
+- Node matching is case-insensitive.
+- `actor` and `actor.name` both affect actor name mapping.
+- After mapping, list values and actor names are deduped by mapped value.
 
 ### 1) `name`
 

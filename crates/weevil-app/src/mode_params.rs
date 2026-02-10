@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use crate::source_priority::SourcePriority;
+use crate::source_runner::NodeValueMapper;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum MultiFolderStrategy {
@@ -19,6 +20,7 @@ pub(crate) struct FileModeParams {
     save_images: bool,
     multi_source_max_sources: u32,
     source_priority: SourcePriority,
+    node_value_mapper: NodeValueMapper,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -68,6 +70,7 @@ impl FileModeParams {
         save_images: bool,
         multi_source_max_sources: u32,
         source_priority: SourcePriority,
+        node_value_mapper: NodeValueMapper,
     ) -> Self {
         Self {
             scripts,
@@ -78,6 +81,7 @@ impl FileModeParams {
             save_images,
             multi_source_max_sources,
             source_priority,
+            node_value_mapper,
         }
     }
 
@@ -111,5 +115,31 @@ impl FileModeParams {
 
     pub(crate) fn source_priority(&self) -> &SourcePriority {
         &self.source_priority
+    }
+
+    pub(crate) fn node_value_mapper(&self) -> &NodeValueMapper {
+        &self.node_value_mapper
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn file_mode_params_exposes_node_value_mapper() {
+        let params = FileModeParams::new(
+            vec![],
+            "out/{title}".to_string(),
+            vec![],
+            MultiFolderStrategy::First,
+            false,
+            false,
+            2,
+            SourcePriority::default(),
+            NodeValueMapper::from_csv("genre,剧情,Drama\n").expect("mapper"),
+        );
+
+        assert!(params.node_value_mapper().has_rules());
     }
 }

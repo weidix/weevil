@@ -54,6 +54,7 @@ pub(crate) fn run_file_mode_group(
         params.multi_source(),
         params.multi_source_max_sources(),
         params.source_priority(),
+        params.node_value_mapper(),
         input_name.as_str(),
         input_path.as_str(),
     )?;

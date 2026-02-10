@@ -14,7 +14,7 @@
 - [x] Allow configuring scripts with path glob patterns (e.g., `xxx/xxx/*.lua`, `xxx/**/*.lua`).
 - [x] Support passing multiple input files in `file` mode for unified migration and naming of split parts.
 - [x] Support auto-detecting split video parts in the same directory in `dir` and `watch` modes, then applying unified migration and naming.
-- [ ] Support `tag` and other node-name mapping.
+- [x] Support `tag` and other node-name mapping.
 
 ## weevil-lua
 - [x] Expose `weevil.html` / `selector` / `xpath` / `http` / `json` / `log` APIs.

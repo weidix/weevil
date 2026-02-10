@@ -8,6 +8,7 @@ use crate::errors::AppError;
 use crate::source_priority::{SourcePriority, SourcePriorityConfig};
 
 use self::script_paths::{dedupe_paths, expand_script_patterns};
+use self::value_types::{StringList, StringPathList};
 
 const DEFAULT_CONFIG_PATH: &str = "weevil.toml";
 
@@ -28,6 +29,7 @@ pub(crate) struct NameCliOverrides {
     pub(crate) multi_source: Option<bool>,
     pub(crate) save_images: Option<bool>,
     pub(crate) multi_source_max_sources: Option<u32>,
+    pub(crate) node_mapping_csv: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -42,6 +44,7 @@ pub(crate) struct ModeCliOverrides {
     pub(crate) multi_source: Option<bool>,
     pub(crate) save_images: Option<bool>,
     pub(crate) multi_source_max_sources: Option<u32>,
+    pub(crate) node_mapping_csv: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -49,6 +52,99 @@ pub(crate) struct DirCliOverrides {
     pub(crate) input: Option<PathBuf>,
     pub(crate) mode: ModeCliOverrides,
     pub(crate) max_depth: Option<i32>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ResolvedNameConfig {
+    pub(crate) scripts: Vec<PathBuf>,
+    pub(crate) output: PathBuf,
+    pub(crate) multi_source: bool,
+    pub(crate) save_images: bool,
+    pub(crate) multi_source_max_sources: u32,
+    pub(crate) source_priority: SourcePriority,
+    pub(crate) node_mapping_csv: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ResolvedModeConfig {
+    pub(crate) scripts: Vec<PathBuf>,
+    pub(crate) output: String,
+    pub(crate) input_name_rules: Vec<String>,
+    pub(crate) folder_multi: FolderMultiStrategy,
+    pub(crate) fetch_threads: u32,
+    pub(crate) throttle_same_script: bool,
+    pub(crate) script_throttle_base_ms: u64,
+    pub(crate) multi_source: bool,
+    pub(crate) save_images: bool,
+    pub(crate) multi_source_max_sources: u32,
+    pub(crate) source_priority: SourcePriority,
+    pub(crate) node_mapping_csv: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ResolvedDirConfig {
+    pub(crate) input: PathBuf,
+    pub(crate) mode: ResolvedModeConfig,
+    pub(crate) max_depth: i32,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
+struct SharedConfig {
+    script: Option<PathBuf>,
+    scripts: Option<StringPathList>,
+    output: Option<String>,
+    input_name_rule: Option<StringList>,
+    folder_multi: Option<FolderMultiStrategy>,
+    max_depth: Option<i32>,
+    fetch_threads: Option<u32>,
+    throttle_same_script: Option<bool>,
+    script_throttle_base_ms: Option<u64>,
+    multi_source: Option<bool>,
+    save_images: Option<bool>,
+    multi_source_max_sources: Option<u32>,
+    source_priority: Option<SourcePriorityConfig>,
+    node_mapping_csv: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
+struct NameConfig {
+    script: Option<PathBuf>,
+    scripts: Option<StringPathList>,
+    output: Option<PathBuf>,
+    multi_source: Option<bool>,
+    save_images: Option<bool>,
+    multi_source_max_sources: Option<u32>,
+    source_priority: Option<SourcePriorityConfig>,
+    node_mapping_csv: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
+struct ModeConfig {
+    script: Option<PathBuf>,
+    scripts: Option<StringPathList>,
+    output: Option<String>,
+    input_name_rule: Option<StringList>,
+    folder_multi: Option<FolderMultiStrategy>,
+    max_depth: Option<i32>,
+    fetch_threads: Option<u32>,
+    throttle_same_script: Option<bool>,
+    script_throttle_base_ms: Option<u64>,
+    multi_source: Option<bool>,
+    save_images: Option<bool>,
+    multi_source_max_sources: Option<u32>,
+    source_priority: Option<SourcePriorityConfig>,
+    node_mapping_csv: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
+struct DirConfig {
+    input: Option<PathBuf>,
+    #[serde(flatten)]
+    mode: ModeConfig,
 }
 
 impl AppConfig {
@@ -69,10 +165,7 @@ impl AppConfig {
         &self,
         cli: &NameCliOverrides,
     ) -> Result<ResolvedNameConfig, AppError> {
-        let scripts = self
-            .resolve_name_scripts(cli)
-            .into_iter()
-            .collect::<Vec<_>>();
+        let scripts = self.resolve_name_scripts(cli);
         if scripts.is_empty() {
             return Err(AppError::ConfigMissingField {
                 mode: "name",
@@ -110,6 +203,12 @@ impl AppConfig {
             self.shared.source_priority.as_ref(),
         );
 
+        let node_mapping_csv = cli
+            .node_mapping_csv
+            .clone()
+            .or_else(|| self.name.node_mapping_csv.clone())
+            .or_else(|| self.shared.node_mapping_csv.clone());
+
         Ok(ResolvedNameConfig {
             scripts,
             output,
@@ -117,6 +216,7 @@ impl AppConfig {
             save_images,
             multi_source_max_sources,
             source_priority,
+            node_mapping_csv,
         })
     }
 
@@ -171,125 +271,40 @@ impl AppConfig {
             .or_else(|| self.name.output.clone())
             .or_else(|| self.shared.output.clone().map(PathBuf::from))
     }
-}
 
-#[derive(Debug, Clone)]
-pub(crate) struct ResolvedNameConfig {
-    pub(crate) scripts: Vec<PathBuf>,
-    pub(crate) output: PathBuf,
-    pub(crate) multi_source: bool,
-    pub(crate) save_images: bool,
-    pub(crate) multi_source_max_sources: u32,
-    pub(crate) source_priority: SourcePriority,
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct ResolvedModeConfig {
-    pub(crate) scripts: Vec<PathBuf>,
-    pub(crate) output: String,
-    pub(crate) input_name_rules: Vec<String>,
-    pub(crate) folder_multi: FolderMultiStrategy,
-    pub(crate) fetch_threads: u32,
-    pub(crate) throttle_same_script: bool,
-    pub(crate) script_throttle_base_ms: u64,
-    pub(crate) multi_source: bool,
-    pub(crate) save_images: bool,
-    pub(crate) multi_source_max_sources: u32,
-    pub(crate) source_priority: SourcePriority,
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct ResolvedDirConfig {
-    pub(crate) input: PathBuf,
-    pub(crate) mode: ResolvedModeConfig,
-    pub(crate) max_depth: i32,
-}
-
-#[derive(Debug, Clone, Default, Deserialize)]
-#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
-struct SharedConfig {
-    script: Option<PathBuf>,
-    scripts: Option<StringPathList>,
-    output: Option<String>,
-    input_name_rule: Option<StringList>,
-    folder_multi: Option<FolderMultiStrategy>,
-    max_depth: Option<i32>,
-    fetch_threads: Option<u32>,
-    throttle_same_script: Option<bool>,
-    script_throttle_base_ms: Option<u64>,
-    multi_source: Option<bool>,
-    save_images: Option<bool>,
-    multi_source_max_sources: Option<u32>,
-    source_priority: Option<SourcePriorityConfig>,
-}
-
-#[derive(Debug, Clone, Default, Deserialize)]
-#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
-struct NameConfig {
-    script: Option<PathBuf>,
-    scripts: Option<StringPathList>,
-    output: Option<PathBuf>,
-    multi_source: Option<bool>,
-    save_images: Option<bool>,
-    multi_source_max_sources: Option<u32>,
-    source_priority: Option<SourcePriorityConfig>,
-}
-
-#[derive(Debug, Clone, Default, Deserialize)]
-#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
-struct ModeConfig {
-    script: Option<PathBuf>,
-    scripts: Option<StringPathList>,
-    output: Option<String>,
-    input_name_rule: Option<StringList>,
-    folder_multi: Option<FolderMultiStrategy>,
-    max_depth: Option<i32>,
-    fetch_threads: Option<u32>,
-    throttle_same_script: Option<bool>,
-    script_throttle_base_ms: Option<u64>,
-    multi_source: Option<bool>,
-    save_images: Option<bool>,
-    multi_source_max_sources: Option<u32>,
-    source_priority: Option<SourcePriorityConfig>,
-}
-
-#[derive(Debug, Clone, Default, Deserialize)]
-#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
-struct DirConfig {
-    input: Option<PathBuf>,
-    #[serde(flatten)]
-    mode: ModeConfig,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(untagged)]
-enum StringList {
-    One(String),
-    Many(Vec<String>),
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(untagged)]
-enum StringPathList {
-    One(PathBuf),
-    Many(Vec<PathBuf>),
-}
-
-impl StringPathList {
-    fn to_vec(&self) -> Vec<PathBuf> {
-        match self {
-            StringPathList::One(value) => vec![value.clone()],
-            StringPathList::Many(values) => values.clone(),
+    fn resolve_name_scripts(&self, cli: &NameCliOverrides) -> Vec<PathBuf> {
+        let cli_scripts = dedupe_paths(cli.scripts.clone());
+        if !cli_scripts.is_empty() {
+            return cli_scripts;
         }
-    }
-}
 
-impl StringList {
-    fn to_vec(&self) -> Vec<String> {
-        match self {
-            StringList::One(value) => vec![value.clone()],
-            StringList::Many(values) => values.clone(),
+        if let Some(scripts) = self
+            .name
+            .scripts
+            .as_ref()
+            .map(StringPathList::to_vec)
+            .map(expand_script_patterns)
+            .filter(|scripts| !scripts.is_empty())
+        {
+            return scripts;
         }
+
+        if let Some(script) = self.name.script.clone() {
+            return expand_script_patterns(vec![script]);
+        }
+
+        if let Some(scripts) = self
+            .shared
+            .scripts
+            .as_ref()
+            .map(StringPathList::to_vec)
+            .map(expand_script_patterns)
+            .filter(|scripts| !scripts.is_empty())
+        {
+            return scripts;
+        }
+
+        expand_script_patterns(self.shared.script.clone().into_iter().collect())
     }
 }
 
@@ -386,6 +401,12 @@ fn resolve_mode_config(
         shared.source_priority.as_ref(),
     );
 
+    let node_mapping_csv = cli
+        .node_mapping_csv
+        .clone()
+        .or_else(|| mode_config.node_mapping_csv.clone())
+        .or_else(|| shared.node_mapping_csv.clone());
+
     Ok(ResolvedModeConfig {
         scripts,
         output,
@@ -398,44 +419,8 @@ fn resolve_mode_config(
         save_images,
         multi_source_max_sources,
         source_priority,
+        node_mapping_csv,
     })
-}
-
-impl AppConfig {
-    fn resolve_name_scripts(&self, cli: &NameCliOverrides) -> Vec<PathBuf> {
-        let cli_scripts = dedupe_paths(cli.scripts.clone());
-        if !cli_scripts.is_empty() {
-            return cli_scripts;
-        }
-
-        if let Some(scripts) = self
-            .name
-            .scripts
-            .as_ref()
-            .map(StringPathList::to_vec)
-            .map(expand_script_patterns)
-            .filter(|scripts| !scripts.is_empty())
-        {
-            return scripts;
-        }
-
-        if let Some(script) = self.name.script.clone() {
-            return expand_script_patterns(vec![script]);
-        }
-
-        if let Some(scripts) = self
-            .shared
-            .scripts
-            .as_ref()
-            .map(StringPathList::to_vec)
-            .map(expand_script_patterns)
-            .filter(|scripts| !scripts.is_empty())
-        {
-            return scripts;
-        }
-
-        expand_script_patterns(self.shared.script.clone().into_iter().collect())
-    }
 }
 
 fn resolve_mode_scripts(
@@ -481,6 +466,7 @@ fn resolve_mode_scripts(
 fn resolve_max_depth(mode: &ModeConfig, shared: &SharedConfig, cli: Option<i32>) -> i32 {
     cli.or(mode.max_depth).or(shared.max_depth).unwrap_or(-1)
 }
+
 #[cfg(test)]
 #[path = "tests/config_local.rs"]
 mod local_tests;
@@ -493,3 +479,4 @@ mod tests;
 
 mod script_listing;
 mod script_paths;
+mod value_types;

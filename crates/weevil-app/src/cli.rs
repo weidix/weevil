@@ -19,6 +19,13 @@ pub(crate) struct Cli {
         help = "Path to TOML config file; defaults to ./weevil.toml when present."
     )]
     pub(crate) config: Option<PathBuf>,
+    #[arg(
+        long,
+        value_name = "FILE",
+        global = true,
+        help = "CSV file path for node-value mapping (node,from,to)."
+    )]
+    pub(crate) node_mapping_csv: Option<PathBuf>,
     #[command(subcommand)]
     pub(crate) command: Command,
 }
