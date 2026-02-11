@@ -23,6 +23,19 @@ actor,ActorA,actor_a,actor_b
 }
 
 #[test]
+fn parse_csv_allows_empty_to() {
+    let mapper = NodeValueMapper::from_csv(
+        r#"
+node,to,from1
+genre,,from_a
+"#,
+    )
+    .expect("mapper");
+
+    assert_eq!(mapper.map_value("genre", "from_a"), "");
+}
+
+#[test]
 fn parse_csv_rejects_invalid_column_count() {
     let error =
         NodeValueMapper::from_csv("genre,action").expect_err("should reject invalid column count");
@@ -60,6 +73,20 @@ tag,TagA,tag_a,tag_b
         vec!["GenreA".to_string(), "from_c".to_string()]
     );
     assert_eq!(movie.tag, vec!["TagA".to_string(), "tag_c".to_string()]);
+}
+
+#[test]
+fn apply_movie_drops_genre_mapped_to_empty() {
+    let mapper = NodeValueMapper::from_csv("genre,,from_a\n").expect("mapper");
+
+    let mut movie = Movie {
+        genre: vec!["from_a".to_string(), "from_b".to_string()],
+        ..Movie::default()
+    };
+
+    mapper.apply_movie(&mut movie);
+
+    assert_eq!(movie.genre, vec!["from_b".to_string()]);
 }
 
 #[test]

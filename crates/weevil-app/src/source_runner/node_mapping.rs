@@ -91,9 +91,9 @@ impl NodeValueMapper {
                 }
             };
 
-            if node.is_empty() || to.is_empty() {
+            if node.is_empty() {
                 return Err(format!(
-                    "invalid CSV at line {line_no}: node/to/from must be non-empty"
+                    "invalid CSV at line {line_no}: node/from must be non-empty"
                 ));
             }
 
@@ -155,7 +155,7 @@ impl NodeValueMapper {
             }
 
             let order = order.unwrap_or(CsvOrder::NodeToFrom);
-            let (node, to, from_columns) = match order {
+            let (node, _to, from_columns) = match order {
                 CsvOrder::NodeToFrom => (node, col2, &columns[2..]),
                 CsvOrder::NodeFromTo => {
                     if columns.len() != 3 {
@@ -168,9 +168,9 @@ impl NodeValueMapper {
                 }
             };
 
-            if node.is_empty() || to.is_empty() {
+            if node.is_empty() {
                 return Err(format!(
-                    "invalid CSV at line {line_no}: node/to/from must be non-empty"
+                    "invalid CSV at line {line_no}: node/from must be non-empty"
                 ));
             }
 
@@ -471,9 +471,9 @@ impl IndexedNodeValueMapper {
             }
         };
 
-        if node.is_empty() || to.is_empty() {
+        if node.is_empty() {
             return Err(format!(
-                "invalid CSV at offset {offset}: node/to/from must be non-empty"
+                "invalid CSV at offset {offset}: node/from must be non-empty"
             ));
         }
 

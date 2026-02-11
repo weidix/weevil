@@ -62,9 +62,9 @@ pub(super) fn load_csv_reader(
             }
         };
 
-        if node.is_empty() || to.is_empty() {
+        if node.is_empty() {
             return Err(format!(
-                "invalid CSV at line {line_no}: node/to/from must be non-empty"
+                "invalid CSV at line {line_no}: node/from must be non-empty"
             ));
         }
 
