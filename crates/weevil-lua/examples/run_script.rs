@@ -1,12 +1,10 @@
 // Usage:
 //   cargo run -p weevil-lua --example run_script -- path/to/script.lua
 //
-// The Lua script is executed directly with the weevil module installed.
-use std::fs;
-
-use mlua::{Lua, Value};
+// The Lua script must return a table with alias, trusted_urls, and run.
+use mlua::Value;
 use tracing_subscriber::fmt;
-use weevil_lua::{HttpMode, install_module};
+use weevil_lua::LuaPlugin;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = std::env::args().skip(1);
@@ -28,19 +26,18 @@ Pass the script path only."
 
     let _ = fmt::try_init();
 
-    let script = fs::read_to_string(&script_path)?;
-    let lua = Lua::new();
-    install_module(&lua, HttpMode::Disabled)?;
-    let result: Value = lua.load(&script).eval()?;
+    let plugin = LuaPlugin::from_file(&script_path)?;
+    plugin.set_log_context("run_script", "lua");
+    let result = plugin.call(())?;
 
     match result {
-        Value::Nil => {
+        None => {
             println!("no result");
         }
-        Value::String(text) => {
+        Some(Value::String(text)) => {
             println!("{}", text.to_str()?);
         }
-        value => {
+        Some(value) => {
             println!("{value:?}");
         }
     }
