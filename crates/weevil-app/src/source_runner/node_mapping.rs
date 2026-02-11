@@ -1,16 +1,19 @@
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::{BufRead, BufReader, Seek, SeekFrom};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use crate::nfo::{Actor, Movie};
 
 mod csv;
+mod loader;
 
 use self::csv::{
     CsvOrder, collect_from_values_line, collect_from_values_offset, has_content, hash_key,
     normalize_key, normalize_optional_key, parse_csv_line, resolve_csv_order,
 };
+use self::loader::load_csv_reader;
 
 #[derive(Debug, Clone)]
 pub(crate) struct NodeValueMapper {
@@ -195,6 +198,18 @@ impl NodeValueMapper {
         })
     }
 
+    pub(crate) fn from_csv_files(paths: &[PathBuf]) -> Result<Self, String> {
+        let mut mapper = Self::default();
+        for path in paths {
+            let file = File::open(path)
+                .map_err(|source| format!("failed to read node mapping CSV {path:?}: {source}"))?;
+            let mut reader = BufReader::new(file);
+            load_csv_reader(&mut mapper, &mut reader)
+                .map_err(|reason| format!("failed to parse node mapping CSV {path:?}: {reason}"))?;
+        }
+        Ok(mapper)
+    }
+
     pub(crate) fn has_rules(&self) -> bool {
         match &self.data {
             NodeValueMapperData::InMemory { rules } => !rules.is_empty(),
@@ -233,7 +248,6 @@ impl NodeValueMapper {
         map_actor_values(self, &mut movie.actor);
     }
 
-    #[cfg(test)]
     fn insert_rule(&mut self, node: &str, from: &str, to: &str) {
         let NodeValueMapperData::InMemory { rules } = &mut self.data else {
             unreachable!("node value mapper must be in-memory to insert rules");

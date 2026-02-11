@@ -41,10 +41,12 @@ fn parse_global_node_mapping_csv() {
     let cli = Cli::try_parse_from([
         "weevil",
         "--node-mapping-csv",
-        "maps/node.csv",
+        "maps/one.csv",
+        "--node-mapping-csv",
+        "maps/two.csv",
         "name",
         "--name",
-        "Spirited Away",
+        "Title",
         "--script",
         "script.lua",
         "--output",
@@ -52,7 +54,10 @@ fn parse_global_node_mapping_csv() {
     ])
     .expect("expected command");
 
-    assert_eq!(cli.node_mapping_csv, Some(PathBuf::from("maps/node.csv")));
+    assert_eq!(
+        cli.node_mapping_csv,
+        vec![PathBuf::from("maps/one.csv"), PathBuf::from("maps/two.csv")]
+    );
 }
 
 #[test]

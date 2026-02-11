@@ -49,7 +49,7 @@ pub(crate) fn run() -> Result<(), AppError> {
                 resolved.save_images,
                 resolved.multi_source_max_sources,
                 &resolved.source_priority,
-                resolved.node_mapping_csv.as_deref(),
+                &resolved.node_mapping_csv,
                 &resolved.output,
             )
         }
@@ -204,7 +204,7 @@ fn dedupe_script_aliases_with_warning(
 }
 
 fn file_mode_params_from_config(resolved: ResolvedModeConfig) -> Result<FileModeParams, AppError> {
-    let mapper = source_runner::load_node_value_mapper(resolved.node_mapping_csv.as_deref())?;
+    let mapper = source_runner::load_node_value_mapper(&resolved.node_mapping_csv)?;
 
     Ok(FileModeParams::new(
         resolved.scripts,
@@ -247,7 +247,7 @@ mod config_mapping_tests {
             save_images: true,
             multi_source_max_sources: 3,
             source_priority: crate::source_priority::SourcePriority::default(),
-            node_mapping_csv: None,
+            node_mapping_csv: Vec::new(),
         };
         let fetch = fetch_mode_params_from_config(resolved);
         assert_eq!(fetch.fetch_threads(), 0);
@@ -291,7 +291,7 @@ mod config_mapping_tests {
             save_images: false,
             multi_source_max_sources: 2,
             source_priority: crate::source_priority::SourcePriority::default(),
-            node_mapping_csv: None,
+            node_mapping_csv: Vec::new(),
         };
 
         let deduped = dedupe_resolved_script_aliases(resolved).expect("dedupe scripts");
@@ -328,7 +328,7 @@ mod config_mapping_tests {
             save_images: false,
             multi_source_max_sources: 2,
             source_priority: crate::source_priority::SourcePriority::default(),
-            node_mapping_csv: None,
+            node_mapping_csv: Vec::new(),
         };
 
         let deduped = dedupe_resolved_name_script_aliases(resolved).expect("dedupe scripts");
@@ -355,7 +355,7 @@ fn run_lua_nfo(
     save_images: bool,
     multi_source_max_sources: u32,
     source_priority: &SourcePriority,
-    node_mapping_csv: Option<&Path>,
+    node_mapping_csv: &[std::path::PathBuf],
     output: &Path,
 ) -> Result<(), AppError> {
     let task = TaskContext::new("name");

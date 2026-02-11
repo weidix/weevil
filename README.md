@@ -224,6 +224,7 @@ cargo run -p weevil-app -- dir --max-depth 1
 - legacy header row (`node,from,to`) keeps the old order
 - lines starting with `#` are ignored
 - `from` values are literal; `|` has no special meaning
+- multiple CSVs are allowed; later CSVs override earlier ones for the same `node` + `from`
 
 Example:
 

@@ -19,7 +19,7 @@ script-throttle-base-ms = 1000 # effective wait ~= base ±100ms
 multi-source = false # false: stop at first successful script; true: aggregate successful sources
 save-images = false # download and save remote poster/fanart images locally
 multi-source-max-sources = 2 # stop after N successful sources when multi-source=true; 0 means unlimited
-node-mapping-csv = "./node_mapping.csv" # optional CSV mapping file: node,to,from... (from supports extra columns)
+node-mapping-csv = ["./node_mapping_base.csv", "./node_mapping_extra.csv"] # optional CSV mapping files: node,to,from... (later files override earlier ones)
 
 [shared.source-priority]
 # Optional source priority by script alias

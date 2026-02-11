@@ -344,18 +344,23 @@ fn no_scripts_configured_error() -> AppError {
     }
 }
 
-pub(crate) fn load_node_value_mapper(path: Option<&Path>) -> Result<NodeValueMapper, AppError> {
-    let Some(path) = path else {
+pub(crate) fn load_node_value_mapper(paths: &[PathBuf]) -> Result<NodeValueMapper, AppError> {
+    if paths.is_empty() {
         return Ok(NodeValueMapper::default());
-    };
+    }
 
-    let file = fs::File::open(path).map_err(|source| AppError::FetchRuntime {
-        reason: format!("failed to read node mapping CSV {path:?}: {source}"),
-    })?;
+    if paths.len() == 1 {
+        let path = &paths[0];
+        let file = fs::File::open(path).map_err(|source| AppError::FetchRuntime {
+            reason: format!("failed to read node mapping CSV {path:?}: {source}"),
+        })?;
 
-    NodeValueMapper::from_csv_file(file).map_err(|reason| AppError::FetchRuntime {
-        reason: format!("failed to parse node mapping CSV {path:?}: {reason}"),
-    })
+        return NodeValueMapper::from_csv_file(file).map_err(|reason| AppError::FetchRuntime {
+            reason: format!("failed to parse node mapping CSV {path:?}: {reason}"),
+        });
+    }
+
+    NodeValueMapper::from_csv_files(paths).map_err(|reason| AppError::FetchRuntime { reason })
 }
 
 #[derive(Clone, Copy)]
@@ -412,7 +417,7 @@ mod tests {
         )
         .expect("write csv");
 
-        let mapper = load_node_value_mapper(Some(csv_path.as_path())).expect("mapper");
+        let mapper = load_node_value_mapper(&[csv_path]).expect("mapper");
         assert!(mapper.has_rules());
         let mut movie = Movie {
             genre: vec!["from_a".to_string()],
@@ -424,7 +429,7 @@ mod tests {
 
     #[test]
     fn load_node_value_mapper_returns_empty_when_missing_path() {
-        let mapper = load_node_value_mapper(None).expect("mapper");
+        let mapper = load_node_value_mapper(&[]).expect("mapper");
         assert!(!mapper.has_rules());
     }
 
@@ -434,7 +439,25 @@ mod tests {
         let csv_path = dir.path().join("node-map.csv");
         std::fs::write(&csv_path, "genre,only-two\n").expect("write csv");
 
-        let error = load_node_value_mapper(Some(csv_path.as_path())).expect_err("invalid");
+        let error = load_node_value_mapper(&[csv_path]).expect_err("invalid");
         assert!(matches!(error, AppError::FetchRuntime { .. }));
+    }
+
+    #[test]
+    fn load_node_value_mapper_merges_multiple_csv_files() {
+        let dir = tempdir().expect("temp dir");
+        let csv_a = dir.path().join("node-a.csv");
+        let csv_b = dir.path().join("node-b.csv");
+        std::fs::write(&csv_a, "node,to,from1\ngenre,GenreA,from_a\n").expect("write csv");
+        std::fs::write(&csv_b, "node,to,from1,from2\ngenre,GenreB,from_a,from_b\n")
+            .expect("write csv");
+
+        let mapper = load_node_value_mapper(&[csv_a, csv_b]).expect("mapper");
+        let mut movie = Movie {
+            genre: vec!["from_a".to_string(), "from_b".to_string()],
+            ..Movie::default()
+        };
+        mapper.apply_movie(&mut movie);
+        assert_eq!(movie.genre, vec!["GenreB".to_string()]);
     }
 }

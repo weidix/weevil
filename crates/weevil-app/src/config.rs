@@ -29,7 +29,7 @@ pub(crate) struct NameCliOverrides {
     pub(crate) multi_source: Option<bool>,
     pub(crate) save_images: Option<bool>,
     pub(crate) multi_source_max_sources: Option<u32>,
-    pub(crate) node_mapping_csv: Option<PathBuf>,
+    pub(crate) node_mapping_csv: Vec<PathBuf>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -44,7 +44,7 @@ pub(crate) struct ModeCliOverrides {
     pub(crate) multi_source: Option<bool>,
     pub(crate) save_images: Option<bool>,
     pub(crate) multi_source_max_sources: Option<u32>,
-    pub(crate) node_mapping_csv: Option<PathBuf>,
+    pub(crate) node_mapping_csv: Vec<PathBuf>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -62,7 +62,7 @@ pub(crate) struct ResolvedNameConfig {
     pub(crate) save_images: bool,
     pub(crate) multi_source_max_sources: u32,
     pub(crate) source_priority: SourcePriority,
-    pub(crate) node_mapping_csv: Option<PathBuf>,
+    pub(crate) node_mapping_csv: Vec<PathBuf>,
 }
 
 #[derive(Debug, Clone)]
@@ -78,7 +78,7 @@ pub(crate) struct ResolvedModeConfig {
     pub(crate) save_images: bool,
     pub(crate) multi_source_max_sources: u32,
     pub(crate) source_priority: SourcePriority,
-    pub(crate) node_mapping_csv: Option<PathBuf>,
+    pub(crate) node_mapping_csv: Vec<PathBuf>,
 }
 
 #[derive(Debug, Clone)]
@@ -104,7 +104,7 @@ struct SharedConfig {
     save_images: Option<bool>,
     multi_source_max_sources: Option<u32>,
     source_priority: Option<SourcePriorityConfig>,
-    node_mapping_csv: Option<PathBuf>,
+    node_mapping_csv: Option<StringPathList>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -117,7 +117,7 @@ struct NameConfig {
     save_images: Option<bool>,
     multi_source_max_sources: Option<u32>,
     source_priority: Option<SourcePriorityConfig>,
-    node_mapping_csv: Option<PathBuf>,
+    node_mapping_csv: Option<StringPathList>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -136,7 +136,7 @@ struct ModeConfig {
     save_images: Option<bool>,
     multi_source_max_sources: Option<u32>,
     source_priority: Option<SourcePriorityConfig>,
-    node_mapping_csv: Option<PathBuf>,
+    node_mapping_csv: Option<StringPathList>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -203,11 +203,11 @@ impl AppConfig {
             self.shared.source_priority.as_ref(),
         );
 
-        let node_mapping_csv = cli
-            .node_mapping_csv
-            .clone()
-            .or_else(|| self.name.node_mapping_csv.clone())
-            .or_else(|| self.shared.node_mapping_csv.clone());
+        let node_mapping_csv = resolve_node_mapping_csv(
+            &cli.node_mapping_csv,
+            self.name.node_mapping_csv.as_ref(),
+            self.shared.node_mapping_csv.as_ref(),
+        );
 
         Ok(ResolvedNameConfig {
             scripts,
@@ -401,11 +401,11 @@ fn resolve_mode_config(
         shared.source_priority.as_ref(),
     );
 
-    let node_mapping_csv = cli
-        .node_mapping_csv
-        .clone()
-        .or_else(|| mode_config.node_mapping_csv.clone())
-        .or_else(|| shared.node_mapping_csv.clone());
+    let node_mapping_csv = resolve_node_mapping_csv(
+        &cli.node_mapping_csv,
+        mode_config.node_mapping_csv.as_ref(),
+        shared.node_mapping_csv.as_ref(),
+    );
 
     Ok(ResolvedModeConfig {
         scripts,
@@ -461,6 +461,31 @@ fn resolve_mode_scripts(
         .script
         .clone()
         .map(|script| expand_script_patterns(vec![script]))
+}
+
+fn resolve_node_mapping_csv(
+    cli: &[PathBuf],
+    mode: Option<&StringPathList>,
+    shared: Option<&StringPathList>,
+) -> Vec<PathBuf> {
+    if !cli.is_empty() {
+        return dedupe_paths(cli.to_vec());
+    }
+
+    if let Some(paths) = mode.and_then(non_empty_path_list) {
+        return dedupe_paths(paths);
+    }
+
+    if let Some(paths) = shared.and_then(non_empty_path_list) {
+        return dedupe_paths(paths);
+    }
+
+    Vec::new()
+}
+
+fn non_empty_path_list(list: &StringPathList) -> Option<Vec<PathBuf>> {
+    let paths = list.to_vec();
+    if paths.is_empty() { None } else { Some(paths) }
 }
 
 fn resolve_max_depth(mode: &ModeConfig, shared: &SharedConfig, cli: Option<i32>) -> i32 {

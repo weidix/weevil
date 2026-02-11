@@ -23,9 +23,10 @@ pub(crate) struct Cli {
         long,
         value_name = "FILE",
         global = true,
-        help = "CSV file path for node-value mapping (node,to,from...; from supports extra columns)."
+        action = clap::ArgAction::Append,
+        help = "CSV file path for node-value mapping (node,to,from...; repeatable)."
     )]
-    pub(crate) node_mapping_csv: Option<PathBuf>,
+    pub(crate) node_mapping_csv: Vec<PathBuf>,
     #[command(subcommand)]
     pub(crate) command: Command,
 }
