@@ -408,18 +408,18 @@ mod tests {
         let csv_path = dir.path().join("node-map.csv");
         std::fs::write(
             &csv_path,
-            "node,from,to\ngenre,剧情,Drama\ngenre,剧情,Drama2\n",
+            "node,to,from\ngenre,GenreA,from_a\ngenre,GenreB,from_a\n",
         )
         .expect("write csv");
 
         let mapper = load_node_value_mapper(Some(csv_path.as_path())).expect("mapper");
         assert!(mapper.has_rules());
         let mut movie = Movie {
-            genre: vec!["剧情".to_string()],
+            genre: vec!["from_a".to_string()],
             ..Movie::default()
         };
         mapper.apply_movie(&mut movie);
-        assert_eq!(movie.genre, vec!["Drama2".to_string()]);
+        assert_eq!(movie.genre, vec!["GenreB".to_string()]);
     }
 
     #[test]

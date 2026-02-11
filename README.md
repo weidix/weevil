@@ -219,19 +219,19 @@ cargo run -p weevil-app -- dir --max-depth 1
 
 `node-mapping-csv` expects UTF-8 CSV with 3 columns:
 
-- `node,from,to`
-- optional header row (`node,from,to`)
+- `node,to,from...` (3+ columns)
+- optional header row (`node,to,from...`)
+- legacy header row (`node,from,to`) keeps the old order
 - lines starting with `#` are ignored
+- `from` values are literal; `|` has no special meaning
 
 Example:
 
 ```csv
-node,from,to
-genre,剧情,Drama
-genre,ドラマ,Drama
-tag,中文字幕,Chinese Subtitle
-actor,爱丽丝,Alice
-actor,艾丽丝,Alice
+node,to,from1,from2
+genre,GenreA,from_a,from_b
+tag,TagA,tag_a,tag_b
+actor,ActorA,actor_a,actor_b
 ```
 
 Notes:

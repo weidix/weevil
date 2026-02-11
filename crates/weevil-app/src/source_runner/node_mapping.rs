@@ -1,11 +1,16 @@
-use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
-use std::hash::{Hash, Hasher};
 use std::io::{BufRead, BufReader, Seek, SeekFrom};
 use std::sync::{Arc, Mutex};
 
 use crate::nfo::{Actor, Movie};
+
+mod csv;
+
+use self::csv::{
+    CsvOrder, collect_from_values_line, collect_from_values_offset, has_content, hash_key,
+    normalize_key, normalize_optional_key, parse_csv_line, resolve_csv_order,
+};
 
 #[derive(Debug, Clone)]
 pub(crate) struct NodeValueMapper {
@@ -24,6 +29,7 @@ enum NodeValueMapperData {
 struct IndexedNodeValueMapper {
     index: Vec<IndexedEntry>,
     file: Arc<Mutex<File>>,
+    order: CsvOrder,
 }
 
 type IndexedEntry = (u64, u64);
@@ -42,7 +48,7 @@ impl NodeValueMapper {
     #[cfg(test)]
     pub(crate) fn from_csv(content: &str) -> Result<Self, String> {
         let mut mapper = Self::default();
-        let mut first_data_row = true;
+        let mut order = None;
 
         for (index, raw_line) in content.lines().enumerate() {
             let line_no = index + 1;
@@ -53,35 +59,45 @@ impl NodeValueMapper {
 
             let columns = parse_csv_line(raw_line)
                 .map_err(|reason| format!("invalid CSV at line {line_no}: {reason}"))?;
-            if columns.len() != 3 {
+            if columns.len() < 3 {
                 let len = columns.len();
                 return Err(format!(
-                    "invalid CSV at line {line_no}: expected 3 columns (node, from, to), got {len}"
+                    "invalid CSV at line {line_no}: expected at least 3 columns (node, to, from...), got {len}"
                 ));
             }
 
             let node = columns[0].trim();
-            let from = columns[1].trim();
-            let to = columns[2].trim();
+            let col2 = columns[1].trim();
+            let col3 = columns[2].trim();
 
-            if first_data_row
-                && node.eq_ignore_ascii_case("node")
-                && from.eq_ignore_ascii_case("from")
-                && to.eq_ignore_ascii_case("to")
-            {
-                first_data_row = false;
+            if resolve_csv_order(&mut order, node, col2, col3) {
                 continue;
             }
 
-            first_data_row = false;
+            let order = order.unwrap_or(CsvOrder::NodeToFrom);
+            let (node, to, from_columns) = match order {
+                CsvOrder::NodeToFrom => (node, col2, &columns[2..]),
+                CsvOrder::NodeFromTo => {
+                    if columns.len() != 3 {
+                        let len = columns.len();
+                        return Err(format!(
+                            "invalid CSV at line {line_no}: expected 3 columns (node, from, to), got {len}"
+                        ));
+                    }
+                    (node, col3, &columns[1..2])
+                }
+            };
 
-            if node.is_empty() || from.is_empty() || to.is_empty() {
+            if node.is_empty() || to.is_empty() {
                 return Err(format!(
-                    "invalid CSV at line {line_no}: node/from/to must be non-empty"
+                    "invalid CSV at line {line_no}: node/to/from must be non-empty"
                 ));
             }
 
-            mapper.insert_rule(node, from, to);
+            let from_values = collect_from_values_line(from_columns, line_no)?;
+            for from in from_values {
+                mapper.insert_rule(node, from.as_str(), to);
+            }
         }
 
         Ok(mapper)
@@ -90,7 +106,7 @@ impl NodeValueMapper {
     pub(crate) fn from_csv_file(file: File) -> Result<Self, String> {
         let mut reader = BufReader::new(file);
         let mut index: Vec<IndexedEntry> = Vec::new();
-        let mut first_data_row = true;
+        let mut order = None;
         let mut line_no = 0usize;
         let mut offset = 0u64;
         let mut line = String::new();
@@ -120,46 +136,61 @@ impl NodeValueMapper {
 
             let columns = parse_csv_line(raw_line)
                 .map_err(|reason| format!("invalid CSV at line {line_no}: {reason}"))?;
-            if columns.len() != 3 {
+            if columns.len() < 3 {
                 let len = columns.len();
                 return Err(format!(
-                    "invalid CSV at line {line_no}: expected 3 columns (node, from, to), got {len}"
+                    "invalid CSV at line {line_no}: expected at least 3 columns (node, to, from...), got {len}"
                 ));
             }
 
             let node = columns[0].trim();
-            let from = columns[1].trim();
-            let to = columns[2].trim();
+            let col2 = columns[1].trim();
+            let col3 = columns[2].trim();
 
-            if first_data_row
-                && node.eq_ignore_ascii_case("node")
-                && from.eq_ignore_ascii_case("from")
-                && to.eq_ignore_ascii_case("to")
-            {
-                first_data_row = false;
+            if resolve_csv_order(&mut order, node, col2, col3) {
                 continue;
             }
 
-            first_data_row = false;
+            let order = order.unwrap_or(CsvOrder::NodeToFrom);
+            let (node, to, from_columns) = match order {
+                CsvOrder::NodeToFrom => (node, col2, &columns[2..]),
+                CsvOrder::NodeFromTo => {
+                    if columns.len() != 3 {
+                        let len = columns.len();
+                        return Err(format!(
+                            "invalid CSV at line {line_no}: expected 3 columns (node, from, to), got {len}"
+                        ));
+                    }
+                    (node, col3, &columns[1..2])
+                }
+            };
 
-            if node.is_empty() || from.is_empty() || to.is_empty() {
+            if node.is_empty() || to.is_empty() {
                 return Err(format!(
-                    "invalid CSV at line {line_no}: node/from/to must be non-empty"
+                    "invalid CSV at line {line_no}: node/to/from must be non-empty"
                 ));
             }
 
+            let from_values = collect_from_values_line(from_columns, line_no)?;
             let node_key = normalize_key(node);
-            let from_key = normalize_key(from);
-            let key_hash = hash_key(node_key.as_str(), from_key.as_str());
-            index.push((key_hash, line_offset));
+            let mut seen_from = HashSet::new();
+            for from in from_values {
+                let from_key = normalize_key(from.as_str());
+                let key_hash = hash_key(node_key.as_str(), from_key.as_str());
+                if seen_from.insert(from_key) {
+                    index.push((key_hash, line_offset));
+                }
+            }
         }
 
         index.sort_by_key(|(hash, _)| *hash);
         let file = reader.into_inner();
+        let order = order.unwrap_or(CsvOrder::NodeToFrom);
         Ok(Self {
             data: NodeValueMapperData::Indexed(IndexedNodeValueMapper {
                 index,
                 file: Arc::new(Mutex::new(file)),
+                order,
             }),
         })
     }
@@ -402,92 +433,47 @@ impl IndexedNodeValueMapper {
         let raw_line = line.trim_end_matches(&['\n', '\r'][..]);
         let columns = parse_csv_line(raw_line)
             .map_err(|reason| format!("invalid CSV at offset {offset}: {reason}"))?;
-        if columns.len() != 3 {
+        if columns.len() < 3 {
             let len = columns.len();
             return Err(format!(
-                "invalid CSV at offset {offset}: expected 3 columns (node, from, to), got {len}"
+                "invalid CSV at offset {offset}: expected at least 3 columns (node, to, from...), got {len}"
             ));
         }
 
         let node = columns[0].trim();
-        let from = columns[1].trim();
-        let to = columns[2].trim();
+        let col2 = columns[1].trim();
+        let col3 = columns[2].trim();
 
-        if node.is_empty() || from.is_empty() || to.is_empty() {
+        let (node, to, from_columns) = match self.order {
+            CsvOrder::NodeToFrom => (node, col2, &columns[2..]),
+            CsvOrder::NodeFromTo => {
+                if columns.len() != 3 {
+                    let len = columns.len();
+                    return Err(format!(
+                        "invalid CSV at offset {offset}: expected 3 columns (node, from, to), got {len}"
+                    ));
+                }
+                (node, col3, &columns[1..2])
+            }
+        };
+
+        if node.is_empty() || to.is_empty() {
             return Err(format!(
-                "invalid CSV at offset {offset}: node/from/to must be non-empty"
+                "invalid CSV at offset {offset}: node/to/from must be non-empty"
             ));
         }
 
-        if normalize_key(node) == node_key && normalize_key(from) == value_key {
+        let from_values = collect_from_values_offset(from_columns, offset)?;
+        if normalize_key(node) == node_key
+            && from_values
+                .iter()
+                .any(|from| normalize_key(from.as_str()) == value_key)
+        {
             return Ok(Some(to.trim().to_string()));
         }
 
         Ok(None)
     }
-}
-
-fn parse_csv_line(line: &str) -> Result<Vec<String>, String> {
-    let mut values = Vec::new();
-    let mut buffer = String::new();
-    let mut chars = line.chars().peekable();
-    let mut in_quotes = false;
-
-    while let Some(ch) = chars.next() {
-        if in_quotes {
-            match ch {
-                '"' => {
-                    if matches!(chars.peek(), Some('"')) {
-                        buffer.push('"');
-                        chars.next();
-                    } else {
-                        in_quotes = false;
-                    }
-                }
-                _ => buffer.push(ch),
-            }
-            continue;
-        }
-
-        match ch {
-            '"' => in_quotes = true,
-            ',' => {
-                values.push(buffer.trim().to_string());
-                buffer.clear();
-            }
-            _ => buffer.push(ch),
-        }
-    }
-
-    if in_quotes {
-        return Err("unterminated quoted value".to_string());
-    }
-
-    values.push(buffer.trim().to_string());
-    Ok(values)
-}
-
-fn normalize_key(value: &str) -> String {
-    value.trim().to_ascii_lowercase()
-}
-
-fn hash_key(node_key: &str, value_key: &str) -> u64 {
-    let mut hasher = DefaultHasher::new();
-    node_key.hash(&mut hasher);
-    0u8.hash(&mut hasher);
-    value_key.hash(&mut hasher);
-    hasher.finish()
-}
-
-fn normalize_optional_key(value: Option<&str>) -> Option<String> {
-    value.and_then(|current| {
-        let key = normalize_key(current);
-        if key.is_empty() { None } else { Some(key) }
-    })
-}
-
-fn has_content(value: &str) -> bool {
-    !value.trim().is_empty()
 }
 
 #[cfg(test)]

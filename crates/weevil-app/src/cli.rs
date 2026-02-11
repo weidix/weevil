@@ -23,7 +23,7 @@ pub(crate) struct Cli {
         long,
         value_name = "FILE",
         global = true,
-        help = "CSV file path for node-value mapping (node,from,to)."
+        help = "CSV file path for node-value mapping (node,to,from...; from supports extra columns)."
     )]
     pub(crate) node_mapping_csv: Option<PathBuf>,
     #[command(subcommand)]
