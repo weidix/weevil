@@ -8,6 +8,7 @@ use weevil_lua::{LuaPlugin, TrustedUrl};
 
 use crate::errors::AppError;
 use crate::nfo::Movie;
+use crate::script_throttle::{ScriptThrottleConfig, run_with_throttle};
 use crate::source_priority::SourcePriority;
 
 mod merge;
@@ -34,6 +35,7 @@ pub(crate) async fn run_name_scripts(
     source_priority: &SourcePriority,
     mapper: &NodeValueMapper,
     name: &str,
+    script_throttle: ScriptThrottleConfig,
 ) -> Result<String, AppError> {
     let output = run_name_scripts_output(
         task_id,
@@ -44,6 +46,7 @@ pub(crate) async fn run_name_scripts(
         source_priority,
         mapper,
         name,
+        script_throttle,
     )
     .await?;
     Ok(output.xml)
@@ -58,6 +61,7 @@ pub(crate) async fn run_name_scripts_output(
     source_priority: &SourcePriority,
     mapper: &NodeValueMapper,
     name: &str,
+    script_throttle: ScriptThrottleConfig,
 ) -> Result<FileScriptOutput, AppError> {
     let mut sources = Vec::new();
     let mut last_error = None;
@@ -68,7 +72,15 @@ pub(crate) async fn run_name_scripts_output(
     );
 
     for script in scripts {
-        match run_script(task_id, task_kind, script, ScriptCallArgs::Name { name }).await {
+        match run_script(
+            task_id,
+            task_kind,
+            script,
+            ScriptCallArgs::Name { name },
+            script_throttle,
+        )
+        .await
+        {
             Ok(source) => {
                 sources.push(source);
                 if sources.len() >= success_limit {
@@ -132,6 +144,7 @@ pub(crate) async fn run_file_scripts(
     mapper: &NodeValueMapper,
     input_name: &str,
     input_path: &str,
+    script_throttle: ScriptThrottleConfig,
 ) -> Result<FileScriptOutput, AppError> {
     let mut sources = Vec::new();
     let mut last_error = None;
@@ -150,6 +163,7 @@ pub(crate) async fn run_file_scripts(
                 input_name,
                 input_path,
             },
+            script_throttle,
         )
         .await
         {
@@ -266,6 +280,7 @@ async fn run_script(
     task_kind: &'static str,
     script: &Path,
     args: ScriptCallArgs<'_>,
+    script_throttle: ScriptThrottleConfig,
 ) -> Result<ScriptSource, AppError> {
     let script_source = fs::read_to_string(script)
         .await
@@ -276,28 +291,32 @@ async fn run_script(
     let alias = plugin.alias().to_string();
     plugin.set_log_context(task_id.to_string(), task_kind);
 
-    let value = match args {
-        ScriptCallArgs::Name { name } => plugin
-            .call_async((name,))
-            .await
-            .map_err(AppError::LuaPlugin)?,
-        ScriptCallArgs::File {
-            input_name,
-            input_path,
-        } => plugin
-            .call_async((input_name, input_path))
-            .await
-            .map_err(AppError::LuaPlugin)?,
-    };
+    let script_key = script.to_string_lossy().to_string();
+    run_with_throttle(&script_key, script_throttle, || async {
+        let value = match args {
+            ScriptCallArgs::Name { name } => plugin
+                .call_async((name,))
+                .await
+                .map_err(AppError::LuaPlugin)?,
+            ScriptCallArgs::File {
+                input_name,
+                input_path,
+            } => plugin
+                .call_async((input_name, input_path))
+                .await
+                .map_err(AppError::LuaPlugin)?,
+        };
 
-    let (movie, xml) = decode_script_output(value, plugin.lua())?;
+        let (movie, xml) = decode_script_output(value, plugin.lua())?;
 
-    Ok(ScriptSource {
-        alias,
-        movie,
-        xml,
-        trusted_urls: plugin.trusted_urls().to_vec(),
+        Ok(ScriptSource {
+            alias,
+            movie,
+            xml,
+            trusted_urls: plugin.trusted_urls().to_vec(),
+        })
     })
+    .await
 }
 
 fn decode_script_output(

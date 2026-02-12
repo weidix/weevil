@@ -127,7 +127,10 @@ async fn process_ready_files(
     let ready_groups = group_ready_files(&ready).await?;
 
     let now = Instant::now();
-    let results = fetch_runtime::run_batch_fetch_with_results(ready_groups, params, fetch).await?;
+    let script_throttle = fetch_runtime::script_throttle_config(fetch);
+    let results =
+        fetch_runtime::run_batch_fetch_with_results(ready_groups, params, fetch, script_throttle)
+            .await?;
     for (group, result) in results {
         match result {
             Ok(()) => {

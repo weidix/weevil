@@ -2,6 +2,7 @@ use crate::app::TaskContext;
 use crate::errors::AppError;
 use crate::image_store::localize_movie_images;
 use crate::mode_params::{FileModeParams, MultiFolderStrategy};
+use crate::script_throttle::ScriptThrottleConfig;
 use crate::source_runner;
 use crate::video_parts::{self, VideoInputGroup, VideoInputPart};
 use std::path::{Path, PathBuf};
@@ -22,6 +23,7 @@ const SUBTITLE_EXTENSIONS: &[&str] = &["srt", "ass", "ssa", "vtt", "sub", "idx",
 pub(crate) async fn run_file_mode_inputs(
     inputs: &[PathBuf],
     params: &FileModeParams,
+    script_throttle: ScriptThrottleConfig,
 ) -> Result<(), AppError> {
     let groups = video_parts::group_video_inputs(inputs)?;
     if groups.is_empty() {
@@ -31,7 +33,7 @@ pub(crate) async fn run_file_mode_inputs(
     }
 
     for group in &groups {
-        run_file_mode_group(group, params).await?;
+        run_file_mode_group(group, params, script_throttle).await?;
     }
     Ok(())
 }
@@ -39,6 +41,7 @@ pub(crate) async fn run_file_mode_inputs(
 pub(crate) async fn run_file_mode_group(
     group: &VideoInputGroup,
     params: &FileModeParams,
+    script_throttle: ScriptThrottleConfig,
 ) -> Result<(), AppError> {
     for part in &group.parts {
         ensure_input_file(&part.path).await?;
@@ -57,6 +60,7 @@ pub(crate) async fn run_file_mode_group(
         params.node_value_mapper(),
         input_name.as_str(),
         input_path.as_str(),
+        script_throttle,
     )
     .await?;
     let mut movie = source_output.movie;

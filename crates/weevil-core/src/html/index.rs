@@ -1,7 +1,7 @@
-use html5ever::{Attribute, LocalName, local_name, ns};
+use html5ever::{LocalName, local_name, ns};
 use rustc_hash::FxHashMap;
 
-use crate::node::{NodeId, normalize_tag_name};
+use crate::node::{ElementAttr, NodeId, normalize_tag_name};
 
 /// Fast tag/id/class index for a parsed HTML tree.
 #[derive(Debug, Default)]
@@ -47,7 +47,7 @@ impl HtmlIndex {
     }
 }
 
-pub(crate) fn index_attr(index: &mut HtmlIndex, node_id: NodeId, attr: &Attribute) {
+pub(crate) fn index_attr(index: &mut HtmlIndex, node_id: NodeId, attr: &ElementAttr) {
     if attr.name.ns == ns!() && attr.name.local == local_name!("id") {
         let value = attr.value.as_ref();
         if value.is_empty() {

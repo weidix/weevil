@@ -3,9 +3,6 @@ use weevil_core::{ElementData, HtmlIndex, HtmlTree, NodeId, NodeKind, Selector, 
 
 pub struct LuaHtmlTree(pub(crate) HtmlTree);
 
-// Safety: LuaHtmlTree is only moved with its Lua state and never accessed concurrently.
-unsafe impl Send for LuaHtmlTree {}
-
 #[derive(Clone, Copy, Debug)]
 pub struct LuaNodeId(pub(crate) NodeId);
 

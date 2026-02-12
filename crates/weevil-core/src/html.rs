@@ -14,6 +14,7 @@ use html5ever::{Attribute, ParseOpts, QualName, parse_document};
 use std::borrow::Cow;
 use std::cell::{Cell, RefCell, UnsafeCell};
 
+use crate::node::{ElementAttr, SendStrTendril};
 pub use crate::node::{ElementData, Node, NodeId, NodeKind};
 pub use error::{HtmlParseError, HtmlParseIssue};
 pub use index::HtmlIndex;
@@ -256,7 +257,7 @@ impl TreeSink for HtmlTreeBuilder {
 
         let data = ElementData {
             name,
-            attrs,
+            attrs: to_element_attrs(attrs),
             template_contents,
             mathml_annotation_xml_integration_point: flags.mathml_annotation_xml_integration_point,
         };
@@ -266,11 +267,14 @@ impl TreeSink for HtmlTreeBuilder {
     }
 
     fn create_comment(&self, text: StrTendril) -> Self::Handle {
-        self.push_node(NodeKind::Comment(text))
+        self.push_node(NodeKind::Comment(to_send_tendril(text)))
     }
 
     fn create_pi(&self, target: StrTendril, data: StrTendril) -> Self::Handle {
-        self.push_node(NodeKind::ProcessingInstruction { target, data })
+        self.push_node(NodeKind::ProcessingInstruction {
+            target: to_send_tendril(target),
+            data: to_send_tendril(data),
+        })
     }
 
     fn append(&self, parent: &Self::Handle, child: NodeOrText<Self::Handle>) {
@@ -304,9 +308,9 @@ impl TreeSink for HtmlTreeBuilder {
             let doctype = push_node(
                 nodes,
                 NodeKind::Doctype {
-                    name,
-                    public_id,
-                    system_id,
+                    name: to_send_tendril(name),
+                    public_id: to_send_tendril(public_id),
+                    system_id: to_send_tendril(system_id),
                 },
             );
             append_node(nodes, self.document, doctype);
@@ -334,6 +338,7 @@ impl TreeSink for HtmlTreeBuilder {
                 {
                     continue;
                 }
+                let attr = to_element_attr(attr);
                 index_attr(&mut index, *target, &attr);
                 element.attrs.push(attr);
             }
@@ -401,7 +406,7 @@ fn append_child(nodes: &mut Vec<Node>, parent: NodeId, child: NodeOrText<NodeId>
             if append_text_to_previous(nodes, last_child, &text) {
                 return;
             }
-            let text_id = push_node(nodes, NodeKind::Text(text));
+            let text_id = push_node(nodes, NodeKind::Text(to_send_tendril(text)));
             append_node(nodes, parent, text_id);
         }
         NodeOrText::AppendNode(node) => append_node(nodes, parent, node),
@@ -415,7 +420,7 @@ fn append_before_sibling(nodes: &mut Vec<Node>, sibling: NodeId, child: NodeOrTe
             if append_text_to_previous(nodes, prev, &text) {
                 return;
             }
-            let text_id = push_node(nodes, NodeKind::Text(text));
+            let text_id = push_node(nodes, NodeKind::Text(to_send_tendril(text)));
             insert_before(nodes, sibling, text_id);
         }
         NodeOrText::AppendNode(node) => insert_before(nodes, sibling, node),
@@ -433,11 +438,27 @@ fn append_text_to_previous(
 
     match &mut nodes[prev_id.index()].kind {
         NodeKind::Text(existing) => {
-            existing.push_tendril(text);
+            let incoming = to_send_tendril(text.clone());
+            existing.push_tendril(&incoming);
             true
         }
         _ => false,
     }
+}
+
+fn to_send_tendril(value: StrTendril) -> SendStrTendril {
+    SendStrTendril::from(value.into_send())
+}
+
+fn to_element_attr(attr: Attribute) -> ElementAttr {
+    ElementAttr {
+        name: attr.name,
+        value: to_send_tendril(attr.value),
+    }
+}
+
+fn to_element_attrs(attrs: Vec<Attribute>) -> Vec<ElementAttr> {
+    attrs.into_iter().map(to_element_attr).collect()
 }
 
 fn append_node(nodes: &mut [Node], parent: NodeId, child: NodeId) {

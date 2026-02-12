@@ -2,8 +2,16 @@
 
 use std::borrow::Cow;
 
-use html5ever::tendril::StrTendril;
-use html5ever::{Attribute, LocalName, QualName};
+use html5ever::tendril::{Atomic, Tendril, fmt};
+use html5ever::{LocalName, QualName};
+
+pub type SendStrTendril = Tendril<fmt::UTF8, Atomic>;
+
+#[derive(Clone, Debug)]
+pub struct ElementAttr {
+    pub name: QualName,
+    pub value: SendStrTendril,
+}
 
 /// Identifier for a node in the HTML tree.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
@@ -94,16 +102,16 @@ impl Node {
 pub enum NodeKind {
     Document,
     Doctype {
-        name: StrTendril,
-        public_id: StrTendril,
-        system_id: StrTendril,
+        name: SendStrTendril,
+        public_id: SendStrTendril,
+        system_id: SendStrTendril,
     },
-    Text(StrTendril),
-    Comment(StrTendril),
+    Text(SendStrTendril),
+    Comment(SendStrTendril),
     Element(ElementData),
     ProcessingInstruction {
-        target: StrTendril,
-        data: StrTendril,
+        target: SendStrTendril,
+        data: SendStrTendril,
     },
 }
 
@@ -121,7 +129,7 @@ impl NodeKind {
 #[derive(Debug)]
 pub struct ElementData {
     pub name: QualName,
-    pub attrs: Vec<Attribute>,
+    pub attrs: Vec<ElementAttr>,
     pub template_contents: Option<NodeId>,
     pub mathml_annotation_xml_integration_point: bool,
 }
@@ -231,12 +239,12 @@ pub(crate) fn normalize_tag_name(name: &str) -> Cow<'_, str> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use html5ever::{Attribute, LocalName, QualName, local_name, ns};
+    use html5ever::{LocalName, QualName, local_name, ns};
 
-    fn make_attr(name: &str, value: &str) -> Attribute {
-        Attribute {
+    fn make_attr(name: &str, value: &str) -> ElementAttr {
+        ElementAttr {
             name: QualName::new(None, ns!(), LocalName::from(name)),
-            value: value.into(),
+            value: SendStrTendril::from(value),
         }
     }
 
@@ -264,7 +272,7 @@ mod tests {
         let element_kind = NodeKind::Element(data);
         assert!(element_kind.as_element().is_some());
 
-        let text_kind = NodeKind::Text(StrTendril::from("hi"));
+        let text_kind = NodeKind::Text(SendStrTendril::from("hi"));
         assert!(text_kind.as_element().is_none());
     }
 
@@ -368,7 +376,7 @@ mod tests {
         assert_eq!(element_node.attr("id"), Some("Hero"));
         assert_eq!(element_node.attr("class"), None);
 
-        let text_node = Node::new(NodeKind::Text(StrTendril::from("hi")));
+        let text_node = Node::new(NodeKind::Text(SendStrTendril::from("hi")));
         assert_eq!(text_node.text(), Some("hi"));
         assert_eq!(text_node.attr("id"), None);
     }

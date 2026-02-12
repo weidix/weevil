@@ -16,6 +16,7 @@ use crate::file_mode;
 use crate::image_store::localize_movie_images;
 use crate::mode_params::{FetchModeParams, FileModeParams, MultiFolderStrategy};
 use crate::script_info;
+use crate::script_throttle::ScriptThrottleConfig;
 use crate::source_priority::SourcePriority;
 use crate::source_runner;
 use crate::watch_mode;
@@ -88,7 +89,7 @@ pub(crate) async fn run() -> Result<(), AppError> {
                 .await?;
             let resolved = dedupe_resolved_script_aliases(resolved).await?;
             let params = file_mode_params_from_config(resolved).await?;
-            file_mode::run_file_mode_inputs(&input, &params).await
+            file_mode::run_file_mode_inputs(&input, &params, ScriptThrottleConfig::disabled()).await
         }
         Command::Dir {
             input,
@@ -390,6 +391,7 @@ async fn run_lua_nfo(
             source_priority,
             &mapper,
             name,
+            ScriptThrottleConfig::disabled(),
         )
         .await?;
         let output_dir = output.parent().unwrap_or_else(|| Path::new("."));
@@ -417,6 +419,7 @@ async fn run_lua_nfo(
             source_priority,
             &mapper,
             name,
+            ScriptThrottleConfig::disabled(),
         )
         .await?
     };

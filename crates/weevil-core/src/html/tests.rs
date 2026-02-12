@@ -108,3 +108,12 @@ fn html_and_text_helpers_render_content() {
     );
     assert_eq!(tree.text(root), "hi");
 }
+
+#[test]
+fn html_tree_is_send() {
+    let tree = parse(r#"<div id="root"><span>hi</span></div>"#);
+    let root = tree.index().by_id("root").expect("missing root");
+    let handle = std::thread::spawn(move || tree.text_content(root));
+    let text = handle.join().expect("join");
+    assert_eq!(text, "hi");
+}
