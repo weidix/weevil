@@ -14,17 +14,22 @@ use reqwest::blocking::Client as BlockingClient;
 pub struct TrustedUrl {
     original: String,
     scheme: String,
-    host: String,
+    host: HostPattern,
     port: Option<u16>,
     path_pattern: String,
     path_has_wildcard: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum HostPattern {
+    Exact(String),
+    WildcardSingleLabel { suffix: String },
+}
+
 impl TrustedUrl {
     pub fn parse(input: &str) -> Result<Self, LuaPluginError> {
-        let url = Url::parse(input).map_err(|_| LuaPluginError::InvalidTrustedUrl {
-            value: input.to_string(),
-        })?;
+        let wildcard_host = trusted_host_wildcard(input);
+        let url = parse_trusted_url(input, wildcard_host)?;
         let scheme = url.scheme().to_string();
         if scheme != "http" && scheme != "https" {
             return Err(LuaPluginError::TrustedUrlUnsupportedScheme {
@@ -41,8 +46,25 @@ impl TrustedUrl {
             .host_str()
             .ok_or_else(|| LuaPluginError::TrustedUrlMissingHost {
                 value: input.to_string(),
-            })?
-            .to_string();
+            })?;
+        let host = match wildcard_host {
+            Some(_) => {
+                let Some(suffix) = host.strip_prefix("wildcard.") else {
+                    return Err(LuaPluginError::InvalidTrustedUrl {
+                        value: input.to_string(),
+                    });
+                };
+                if suffix.is_empty() {
+                    return Err(LuaPluginError::InvalidTrustedUrl {
+                        value: input.to_string(),
+                    });
+                }
+                HostPattern::WildcardSingleLabel {
+                    suffix: suffix.to_ascii_lowercase(),
+                }
+            }
+            None => HostPattern::Exact(host.to_ascii_lowercase()),
+        };
         let path_pattern = if url.path().is_empty() {
             "/".to_string()
         } else {
@@ -70,7 +92,26 @@ impl TrustedUrl {
         let Some(host) = url.host_str() else {
             return false;
         };
-        if !host.eq_ignore_ascii_case(&self.host) {
+        let host_matches = match &self.host {
+            HostPattern::Exact(expected) => host.eq_ignore_ascii_case(expected),
+            HostPattern::WildcardSingleLabel { suffix } => {
+                let host = host.to_ascii_lowercase();
+                if !host.ends_with(suffix) {
+                    return false;
+                }
+                let prefix_len = host.len().saturating_sub(suffix.len());
+                if prefix_len < 2 {
+                    return false;
+                }
+                let prefix = &host[..prefix_len];
+                if !prefix.ends_with('.') {
+                    return false;
+                }
+                let label = &prefix[..prefix.len() - 1];
+                !label.is_empty() && !label.contains('.')
+            }
+        };
+        if !host_matches {
             return false;
         }
         if url.port() != self.port {
@@ -82,6 +123,46 @@ impl TrustedUrl {
             url.path().starts_with(&self.path_pattern)
         }
     }
+}
+
+fn parse_trusted_url(input: &str, wildcard_host: Option<&str>) -> Result<Url, LuaPluginError> {
+    if wildcard_host.is_none() {
+        return Url::parse(input).map_err(|_| LuaPluginError::InvalidTrustedUrl {
+            value: input.to_string(),
+        });
+    }
+
+    let Some((scheme, rest)) = input.split_once("://") else {
+        return Err(LuaPluginError::InvalidTrustedUrl {
+            value: input.to_string(),
+        });
+    };
+    let authority_end = rest
+        .find(|ch| ch == '/' || ch == '?' || ch == '#')
+        .unwrap_or(rest.len());
+    let authority = &rest[..authority_end];
+    if !authority.starts_with("*.") || authority.contains('@') {
+        return Err(LuaPluginError::InvalidTrustedUrl {
+            value: input.to_string(),
+        });
+    }
+    let normalized_authority = authority.replacen("*.", "wildcard.", 1);
+    let normalized = format!(
+        "{scheme}://{normalized_authority}{}",
+        &rest[authority_end..]
+    );
+    Url::parse(&normalized).map_err(|_| LuaPluginError::InvalidTrustedUrl {
+        value: input.to_string(),
+    })
+}
+
+fn trusted_host_wildcard(input: &str) -> Option<&str> {
+    let (_, rest) = input.split_once("://")?;
+    let authority_end = rest
+        .find(|ch| ch == '/' || ch == '?' || ch == '#')
+        .unwrap_or(rest.len());
+    let authority = &rest[..authority_end];
+    authority.strip_prefix("*.")
 }
 
 fn path_glob_matches(pattern: &str, path: &str) -> bool {
@@ -150,6 +231,21 @@ mod tests {
         assert!(trusted.matches(&parsed_url("https://example.com/movie.nfo")));
         assert!(!trusted.matches(&parsed_url("https://example.com/movie.txt")));
         assert!(!trusted.matches(&parsed_url("https://example.com/dir/movie.nfo")));
+    }
+
+    #[test]
+    fn trusted_url_matches_single_label_host_wildcard() {
+        let trusted = trusted_url("https://*.jdbstatic.com/");
+        assert!(trusted.matches(&parsed_url("https://c0.jdbstatic.com/covers/v4/V40e3.jpg")));
+        assert!(!trusted.matches(&parsed_url("https://jdbstatic.com/covers/v4/V40e3.jpg")));
+        assert!(!trusted.matches(&parsed_url("https://a.b.jdbstatic.com/covers/v4/V40e3.jpg")));
+    }
+
+    #[test]
+    fn trusted_url_host_wildcard_respects_port() {
+        let trusted = trusted_url("https://*.example.com:8443/");
+        assert!(trusted.matches(&parsed_url("https://api.example.com:8443/path")));
+        assert!(!trusted.matches(&parsed_url("https://api.example.com/path")));
     }
 }
 
