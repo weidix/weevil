@@ -119,9 +119,6 @@ pub(crate) enum AppError {
     FetchRuntime {
         reason: String,
     },
-    ScriptSyncHttpNotAllowed {
-        path: PathBuf,
-    },
     ScriptInfoNoScripts,
 }
 
@@ -277,12 +274,6 @@ impl fmt::Display for AppError {
             }
             AppError::FetchRuntime { reason } => {
                 write!(f, "fetch runtime error: {reason}")
-            }
-            AppError::ScriptSyncHttpNotAllowed { path } => {
-                write!(
-                    f,
-                    "script {path:?} uses synchronous HTTP APIs; multi-thread mode requires weevil.http.get_async/post_async"
-                )
             }
             AppError::ScriptInfoNoScripts => {
                 write!(f, "no scripts found from CLI or config")

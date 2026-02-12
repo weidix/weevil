@@ -1,10 +1,10 @@
-use std::sync::Arc;
-
 use mlua::{AnyUserData, FromLua, Lua, UserData, UserDataMethods, Value};
 use weevil_core::{ElementData, HtmlIndex, HtmlTree, NodeId, NodeKind, Selector, XPath};
 
-#[derive(Clone)]
-pub struct LuaHtmlTree(pub(crate) Arc<HtmlTree>);
+pub struct LuaHtmlTree(pub(crate) HtmlTree);
+
+// Safety: LuaHtmlTree is only moved with its Lua state and never accessed concurrently.
+unsafe impl Send for LuaHtmlTree {}
 
 #[derive(Clone, Copy, Debug)]
 pub struct LuaNodeId(pub(crate) NodeId);
@@ -17,7 +17,7 @@ pub struct LuaXPath(pub(crate) XPath);
 
 impl LuaHtmlTree {
     pub fn new(tree: HtmlTree) -> Self {
-        Self(Arc::new(tree))
+        Self(tree)
     }
 
     pub fn tree(&self) -> &HtmlTree {
@@ -40,14 +40,6 @@ impl FromLua for LuaNodeId {
         let userdata = AnyUserData::from_lua(value, lua)?;
         let id = userdata.borrow::<LuaNodeId>()?;
         Ok(*id)
-    }
-}
-
-impl FromLua for LuaHtmlTree {
-    fn from_lua(value: Value, lua: &Lua) -> mlua::Result<Self> {
-        let userdata = AnyUserData::from_lua(value, lua)?;
-        let tree = userdata.borrow::<LuaHtmlTree>()?;
-        Ok(tree.clone())
     }
 }
 
@@ -296,7 +288,8 @@ impl UserData for LuaHtmlTree {
 
 impl UserData for LuaSelector {
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
-        methods.add_method("find", |_, this, tree: LuaHtmlTree| {
+        methods.add_method("find", |_, this, tree: AnyUserData| {
+            let tree = tree.borrow::<LuaHtmlTree>()?;
             this.0
                 .find(tree.tree())
                 .map(|matches| matches.into_iter().map(LuaNodeId::new).collect::<Vec<_>>())
@@ -304,14 +297,16 @@ impl UserData for LuaSelector {
         });
         methods.add_method(
             "find_in",
-            |_, this, (tree, node): (LuaHtmlTree, LuaNodeId)| {
+            |_, this, (tree, node): (AnyUserData, LuaNodeId)| {
+                let tree = tree.borrow::<LuaHtmlTree>()?;
                 this.0
                     .find((tree.tree(), node.id()))
                     .map(|matches| matches.into_iter().map(LuaNodeId::new).collect::<Vec<_>>())
                     .map_err(mlua::Error::external)
             },
         );
-        methods.add_method("find_first", |_, this, tree: LuaHtmlTree| {
+        methods.add_method("find_first", |_, this, tree: AnyUserData| {
+            let tree = tree.borrow::<LuaHtmlTree>()?;
             this.0
                 .find_first(tree.tree())
                 .map(|node| node.map(LuaNodeId::new))
@@ -319,20 +314,23 @@ impl UserData for LuaSelector {
         });
         methods.add_method(
             "find_first_in",
-            |_, this, (tree, node): (LuaHtmlTree, LuaNodeId)| {
+            |_, this, (tree, node): (AnyUserData, LuaNodeId)| {
+                let tree = tree.borrow::<LuaHtmlTree>()?;
                 this.0
                     .find_first((tree.tree(), node.id()))
                     .map(|node| node.map(LuaNodeId::new))
                     .map_err(mlua::Error::external)
             },
         );
-        methods.add_method("select_one", |_, this, tree: LuaHtmlTree| {
+        methods.add_method("select_one", |_, this, tree: AnyUserData| {
+            let tree = tree.borrow::<LuaHtmlTree>()?;
             this.0
                 .select_one(tree.tree())
                 .map(|node| node.map(LuaNodeId::new))
                 .map_err(mlua::Error::external)
         });
-        methods.add_method("first_match", |_, this, tree: LuaHtmlTree| {
+        methods.add_method("first_match", |_, this, tree: AnyUserData| {
+            let tree = tree.borrow::<LuaHtmlTree>()?;
             this.0
                 .first_match(tree.tree())
                 .map(|node| node.map(LuaNodeId::new))
@@ -343,7 +341,8 @@ impl UserData for LuaSelector {
 
 impl UserData for LuaXPath {
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
-        methods.add_method("find", |_, this, tree: LuaHtmlTree| {
+        methods.add_method("find", |_, this, tree: AnyUserData| {
+            let tree = tree.borrow::<LuaHtmlTree>()?;
             this.0
                 .find(tree.tree())
                 .map(|matches| matches.into_iter().map(LuaNodeId::new).collect::<Vec<_>>())
@@ -351,14 +350,16 @@ impl UserData for LuaXPath {
         });
         methods.add_method(
             "find_in",
-            |_, this, (tree, node): (LuaHtmlTree, LuaNodeId)| {
+            |_, this, (tree, node): (AnyUserData, LuaNodeId)| {
+                let tree = tree.borrow::<LuaHtmlTree>()?;
                 this.0
                     .find((tree.tree(), node.id()))
                     .map(|matches| matches.into_iter().map(LuaNodeId::new).collect::<Vec<_>>())
                     .map_err(mlua::Error::external)
             },
         );
-        methods.add_method("find_first", |_, this, tree: LuaHtmlTree| {
+        methods.add_method("find_first", |_, this, tree: AnyUserData| {
+            let tree = tree.borrow::<LuaHtmlTree>()?;
             this.0
                 .find_first(tree.tree())
                 .map(|node| node.map(LuaNodeId::new))
@@ -366,20 +367,23 @@ impl UserData for LuaXPath {
         });
         methods.add_method(
             "find_first_in",
-            |_, this, (tree, node): (LuaHtmlTree, LuaNodeId)| {
+            |_, this, (tree, node): (AnyUserData, LuaNodeId)| {
+                let tree = tree.borrow::<LuaHtmlTree>()?;
                 this.0
                     .find_first((tree.tree(), node.id()))
                     .map(|node| node.map(LuaNodeId::new))
                     .map_err(mlua::Error::external)
             },
         );
-        methods.add_method("select_one", |_, this, tree: LuaHtmlTree| {
+        methods.add_method("select_one", |_, this, tree: AnyUserData| {
+            let tree = tree.borrow::<LuaHtmlTree>()?;
             this.0
                 .select_one(tree.tree())
                 .map(|node| node.map(LuaNodeId::new))
                 .map_err(mlua::Error::external)
         });
-        methods.add_method("first_match", |_, this, tree: LuaHtmlTree| {
+        methods.add_method("first_match", |_, this, tree: AnyUserData| {
+            let tree = tree.borrow::<LuaHtmlTree>()?;
             this.0
                 .first_match(tree.tree())
                 .map(|node| node.map(LuaNodeId::new))

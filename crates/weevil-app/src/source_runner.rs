@@ -1,9 +1,9 @@
-use std::fs;
 use std::path::{Path, PathBuf};
 
 use mlua::{LuaSerdeExt, Value};
 use quick_xml::de::from_str;
 use serde::Serialize;
+use tokio::fs;
 use weevil_lua::{LuaPlugin, TrustedUrl};
 
 use crate::errors::AppError;
@@ -25,7 +25,7 @@ pub(crate) struct FileScriptOutput {
     pub(crate) merged_sources: bool,
 }
 
-pub(crate) fn run_name_scripts(
+pub(crate) async fn run_name_scripts(
     task_id: &str,
     task_kind: &'static str,
     scripts: &[PathBuf],
@@ -44,11 +44,12 @@ pub(crate) fn run_name_scripts(
         source_priority,
         mapper,
         name,
-    )?;
+    )
+    .await?;
     Ok(output.xml)
 }
 
-pub(crate) fn run_name_scripts_output(
+pub(crate) async fn run_name_scripts_output(
     task_id: &str,
     task_kind: &'static str,
     scripts: &[PathBuf],
@@ -67,7 +68,7 @@ pub(crate) fn run_name_scripts_output(
     );
 
     for script in scripts {
-        match run_script(task_id, task_kind, script, ScriptCallArgs::Name { name }) {
+        match run_script(task_id, task_kind, script, ScriptCallArgs::Name { name }).await {
             Ok(source) => {
                 sources.push(source);
                 if sources.len() >= success_limit {
@@ -121,7 +122,7 @@ pub(crate) fn run_name_scripts_output(
     })
 }
 
-pub(crate) fn run_file_scripts(
+pub(crate) async fn run_file_scripts(
     task_id: &str,
     task_kind: &'static str,
     scripts: &[PathBuf],
@@ -149,7 +150,9 @@ pub(crate) fn run_file_scripts(
                 input_name,
                 input_path,
             },
-        ) {
+        )
+        .await
+        {
             Ok(source) => {
                 sources.push(source);
                 if sources.len() >= success_limit {
@@ -258,23 +261,32 @@ pub(crate) fn serialize_movie(movie: &Movie) -> Result<String, AppError> {
     Ok(buffer)
 }
 
-fn run_script(
+async fn run_script(
     task_id: &str,
     task_kind: &'static str,
     script: &Path,
     args: ScriptCallArgs<'_>,
 ) -> Result<ScriptSource, AppError> {
-    let plugin = LuaPlugin::from_file(script).map_err(AppError::LuaPlugin)?;
+    let script_source = fs::read_to_string(script)
+        .await
+        .map_err(|err| AppError::FetchRuntime {
+            reason: format!("failed to read script {script:?}: {err}"),
+        })?;
+    let plugin = LuaPlugin::from_str(&script_source).map_err(AppError::LuaPlugin)?;
     let alias = plugin.alias().to_string();
     plugin.set_log_context(task_id.to_string(), task_kind);
 
     let value = match args {
-        ScriptCallArgs::Name { name } => plugin.call((name,)).map_err(AppError::LuaPlugin)?,
+        ScriptCallArgs::Name { name } => plugin
+            .call_async((name,))
+            .await
+            .map_err(AppError::LuaPlugin)?,
         ScriptCallArgs::File {
             input_name,
             input_path,
         } => plugin
-            .call((input_name, input_path))
+            .call_async((input_name, input_path))
+            .await
             .map_err(AppError::LuaPlugin)?,
     };
 
@@ -344,23 +356,30 @@ fn no_scripts_configured_error() -> AppError {
     }
 }
 
-pub(crate) fn load_node_value_mapper(paths: &[PathBuf]) -> Result<NodeValueMapper, AppError> {
+pub(crate) async fn load_node_value_mapper(paths: &[PathBuf]) -> Result<NodeValueMapper, AppError> {
     if paths.is_empty() {
         return Ok(NodeValueMapper::default());
     }
 
-    if paths.len() == 1 {
-        let path = &paths[0];
-        let file = fs::File::open(path).map_err(|source| AppError::FetchRuntime {
-            reason: format!("failed to read node mapping CSV {path:?}: {source}"),
-        })?;
+    let paths = paths.to_vec();
+    tokio::task::spawn_blocking(move || {
+        if paths.len() == 1 {
+            let path = &paths[0];
+            let file = std::fs::File::open(path)
+                .map_err(|source| format!("failed to read node mapping CSV {path:?}: {source}"))?;
 
-        return NodeValueMapper::from_csv_file(file).map_err(|reason| AppError::FetchRuntime {
-            reason: format!("failed to parse node mapping CSV {path:?}: {reason}"),
-        });
-    }
+            return NodeValueMapper::from_csv_file(file)
+                .map_err(|reason| format!("failed to parse node mapping CSV {path:?}: {reason}"));
+        }
 
-    NodeValueMapper::from_csv_files(paths).map_err(|reason| AppError::FetchRuntime { reason })
+        NodeValueMapper::from_csv_files(&paths)
+            .map_err(|reason| format!("failed to parse node mapping CSV: {reason}"))
+    })
+    .await
+    .map_err(|err| AppError::FetchRuntime {
+        reason: format!("failed to load node mapping CSV: {err}"),
+    })?
+    .map_err(|reason| AppError::FetchRuntime { reason })
 }
 
 #[derive(Clone, Copy)]
@@ -407,17 +426,18 @@ mod tests {
         assert!(!should_merge_sources(false, true, 1));
     }
 
-    #[test]
-    fn load_node_value_mapper_loads_csv_file() {
+    #[tokio::test]
+    async fn load_node_value_mapper_loads_csv_file() {
         let dir = tempdir().expect("temp dir");
         let csv_path = dir.path().join("node-map.csv");
-        std::fs::write(
+        tokio::fs::write(
             &csv_path,
             "node,to,from\ngenre,GenreA,from_a\ngenre,GenreB,from_a\n",
         )
+        .await
         .expect("write csv");
 
-        let mapper = load_node_value_mapper(&[csv_path]).expect("mapper");
+        let mapper = load_node_value_mapper(&[csv_path]).await.expect("mapper");
         assert!(mapper.has_rules());
         let mut movie = Movie {
             genre: vec!["from_a".to_string()],
@@ -427,32 +447,41 @@ mod tests {
         assert_eq!(movie.genre, vec!["GenreB".to_string()]);
     }
 
-    #[test]
-    fn load_node_value_mapper_returns_empty_when_missing_path() {
-        let mapper = load_node_value_mapper(&[]).expect("mapper");
+    #[tokio::test]
+    async fn load_node_value_mapper_returns_empty_when_missing_path() {
+        let mapper = load_node_value_mapper(&[]).await.expect("mapper");
         assert!(!mapper.has_rules());
     }
 
-    #[test]
-    fn load_node_value_mapper_rejects_invalid_csv() {
+    #[tokio::test]
+    async fn load_node_value_mapper_rejects_invalid_csv() {
         let dir = tempdir().expect("temp dir");
         let csv_path = dir.path().join("node-map.csv");
-        std::fs::write(&csv_path, "genre,only-two\n").expect("write csv");
+        tokio::fs::write(&csv_path, "genre,only-two\n")
+            .await
+            .expect("write csv");
 
-        let error = load_node_value_mapper(&[csv_path]).expect_err("invalid");
+        let error = load_node_value_mapper(&[csv_path])
+            .await
+            .expect_err("invalid");
         assert!(matches!(error, AppError::FetchRuntime { .. }));
     }
 
-    #[test]
-    fn load_node_value_mapper_merges_multiple_csv_files() {
+    #[tokio::test]
+    async fn load_node_value_mapper_merges_multiple_csv_files() {
         let dir = tempdir().expect("temp dir");
         let csv_a = dir.path().join("node-a.csv");
         let csv_b = dir.path().join("node-b.csv");
-        std::fs::write(&csv_a, "node,to,from1\ngenre,GenreA,from_a\n").expect("write csv");
-        std::fs::write(&csv_b, "node,to,from1,from2\ngenre,GenreB,from_a,from_b\n")
+        tokio::fs::write(&csv_a, "node,to,from1\ngenre,GenreA,from_a\n")
+            .await
+            .expect("write csv");
+        tokio::fs::write(&csv_b, "node,to,from1,from2\ngenre,GenreB,from_a,from_b\n")
+            .await
             .expect("write csv");
 
-        let mapper = load_node_value_mapper(&[csv_a, csv_b]).expect("mapper");
+        let mapper = load_node_value_mapper(&[csv_a, csv_b])
+            .await
+            .expect("mapper");
         let mut movie = Movie {
             genre: vec!["from_a".to_string(), "from_b".to_string()],
             ..Movie::default()

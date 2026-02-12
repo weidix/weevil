@@ -15,9 +15,10 @@ mod source_runner;
 mod video_parts;
 mod watch_mode;
 
-fn main() {
+#[tokio::main]
+async fn main() {
     logging::init_tracing();
-    if let Err(error) = app::run() {
+    if let Err(error) = app::run().await {
         error.report();
         std::process::exit(error.exit_code());
     }

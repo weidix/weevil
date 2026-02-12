@@ -1,9 +1,9 @@
 use std::collections::{BTreeMap, HashSet};
-use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 use regex::Regex;
+use tokio::fs;
 
 use crate::errors::AppError;
 
@@ -133,27 +133,35 @@ pub(crate) fn group_video_paths(paths: &[PathBuf]) -> Result<Vec<Vec<PathBuf>>, 
         .collect::<Vec<_>>())
 }
 
-pub(crate) fn sibling_split_group_paths(path: &Path) -> Result<Vec<PathBuf>, AppError> {
+pub(crate) async fn sibling_split_group_paths(path: &Path) -> Result<Vec<PathBuf>, AppError> {
     if !is_video_path(path) {
         return Ok(vec![path.to_path_buf()]);
     }
 
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
-    let entries = fs::read_dir(parent).map_err(|err| AppError::DirRead {
-        path: parent.to_path_buf(),
-        source: err,
-    })?;
-
-    let mut videos = Vec::new();
-    for entry in entries {
-        let entry = entry.map_err(|err| AppError::DirRead {
+    let mut entries = fs::read_dir(parent)
+        .await
+        .map_err(|err| AppError::DirRead {
             path: parent.to_path_buf(),
             source: err,
         })?;
-        let file_type = entry.file_type().map_err(|err| AppError::DirEntryType {
-            path: entry.path(),
+
+    let mut videos = Vec::new();
+    while let Some(entry) = entries
+        .next_entry()
+        .await
+        .map_err(|err| AppError::DirRead {
+            path: parent.to_path_buf(),
             source: err,
-        })?;
+        })?
+    {
+        let file_type = entry
+            .file_type()
+            .await
+            .map_err(|err| AppError::DirEntryType {
+                path: entry.path(),
+                source: err,
+            })?;
         if !file_type.is_file() {
             continue;
         }

@@ -1,12 +1,14 @@
 use std::sync::Arc;
 
-use reqwest::Client as AsyncClient;
 use reqwest::Version;
-use reqwest::blocking::Client as BlockingClient;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use url::Url;
 
 use crate::error::LuaPluginError;
+#[cfg(feature = "async")]
+use reqwest::Client as AsyncClient;
+#[cfg(not(feature = "async"))]
+use reqwest::blocking::Client as BlockingClient;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TrustedUrl {
@@ -154,6 +156,7 @@ mod tests {
 #[derive(Debug, Clone)]
 pub struct HttpClient {
     allowlist: Arc<Vec<TrustedUrl>>,
+    #[cfg(not(feature = "async"))]
     blocking: BlockingClient,
     #[cfg(feature = "async")]
     async_client: AsyncClient,
@@ -167,6 +170,7 @@ pub struct HttpRequestOptions {
 
 impl HttpClient {
     pub fn new(allowlist: Vec<TrustedUrl>) -> Result<Self, LuaPluginError> {
+        #[cfg(not(feature = "async"))]
         let blocking = BlockingClient::builder()
             .user_agent("weevil-lua/0.1")
             .build()
@@ -184,6 +188,7 @@ impl HttpClient {
             })?;
         Ok(Self {
             allowlist: Arc::new(allowlist),
+            #[cfg(not(feature = "async"))]
             blocking,
             #[cfg(feature = "async")]
             async_client,
@@ -194,6 +199,7 @@ impl HttpClient {
         self.allowlist.as_ref()
     }
 
+    #[cfg(not(feature = "async"))]
     pub fn get_blocking(
         &self,
         url: &str,
@@ -225,6 +231,7 @@ impl HttpClient {
         })
     }
 
+    #[cfg(not(feature = "async"))]
     pub fn get_bytes_blocking(
         &self,
         url: &str,
@@ -259,6 +266,7 @@ impl HttpClient {
         Ok(bytes.to_vec())
     }
 
+    #[cfg(not(feature = "async"))]
     pub fn post_blocking(
         &self,
         url: &str,
@@ -327,6 +335,45 @@ impl HttpClient {
                 url: parsed.to_string(),
                 source: err,
             })
+    }
+
+    #[cfg(feature = "async")]
+    pub async fn get_bytes_async(
+        &self,
+        url: &str,
+        options: &HttpRequestOptions,
+    ) -> Result<Vec<u8>, LuaPluginError> {
+        let parsed = self.ensure_trusted(url)?;
+        let mut request = self.async_client.get(parsed.as_str());
+        if let Some(version) = options.version {
+            request = request.version(version);
+        }
+        if !options.headers.is_empty() {
+            let header_map = build_headers(&options.headers)?;
+            request = request.headers(header_map);
+        }
+        let response = request
+            .send()
+            .await
+            .map_err(|err| LuaPluginError::HttpRequest {
+                url: parsed.to_string(),
+                source: err,
+            })?;
+        let status = response.status();
+        if !status.is_success() {
+            return Err(LuaPluginError::HttpStatus {
+                url: parsed.to_string(),
+                status: status.as_u16(),
+            });
+        }
+        let bytes = response
+            .bytes()
+            .await
+            .map_err(|err| LuaPluginError::HttpRequest {
+                url: parsed.to_string(),
+                source: err,
+            })?;
+        Ok(bytes.to_vec())
     }
 
     #[cfg(feature = "async")]

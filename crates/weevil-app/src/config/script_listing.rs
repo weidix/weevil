@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use super::{AppConfig, StringPathList, dedupe_paths, expand_script_patterns};
 
 impl AppConfig {
-    pub(crate) fn list_script_paths_for_info(&self) -> Vec<PathBuf> {
+    pub(crate) async fn list_script_paths_for_info(&self) -> Vec<PathBuf> {
         let mut scripts = Vec::new();
 
         append_script_sources(&mut scripts, &self.shared.script, &self.shared.scripts);
@@ -16,7 +16,7 @@ impl AppConfig {
             &self.watch.mode.scripts,
         );
 
-        expand_script_patterns(dedupe_paths(scripts))
+        expand_script_patterns(dedupe_paths(scripts)).await
     }
 }
 
@@ -40,8 +40,8 @@ mod tests {
 
     use super::*;
 
-    #[test]
-    fn list_script_paths_for_info_collects_all_sections() {
+    #[tokio::test]
+    async fn list_script_paths_for_info_collects_all_sections() {
         let config: AppConfig = toml::from_str(
             r#"
 [shared]
@@ -65,7 +65,7 @@ scripts = ["scripts/watch.lua"]
         )
         .expect("config");
 
-        let scripts = config.list_script_paths_for_info();
+        let scripts = config.list_script_paths_for_info().await;
         assert_eq!(
             scripts,
             vec![
@@ -80,19 +80,25 @@ scripts = ["scripts/watch.lua"]
         );
     }
 
-    #[test]
-    fn list_script_paths_for_info_expands_glob_patterns() {
+    #[tokio::test]
+    async fn list_script_paths_for_info_expands_glob_patterns() {
         let dir = tempdir().expect("temp dir");
         let scripts_dir = dir.path().join("scripts");
-        std::fs::create_dir_all(scripts_dir.join("nested")).expect("create scripts");
+        tokio::fs::create_dir_all(scripts_dir.join("nested"))
+            .await
+            .expect("create scripts");
 
         let alpha = scripts_dir.join("alpha.lua");
         let beta = scripts_dir.join("nested").join("beta.lua");
         let other = scripts_dir.join("nested").join("ignore.txt");
 
-        std::fs::write(&alpha, "return {} ").expect("write alpha");
-        std::fs::write(&beta, "return {} ").expect("write beta");
-        std::fs::write(&other, "ignore").expect("write txt");
+        tokio::fs::write(&alpha, "return {} ")
+            .await
+            .expect("write alpha");
+        tokio::fs::write(&beta, "return {} ")
+            .await
+            .expect("write beta");
+        tokio::fs::write(&other, "ignore").await.expect("write txt");
 
         let config: AppConfig = toml::from_str(&format!(
             r#"
@@ -104,7 +110,7 @@ scripts = ["{}/*.lua", "{}/**/*.lua"]
         ))
         .expect("config");
 
-        let scripts = config.list_script_paths_for_info();
+        let scripts = config.list_script_paths_for_info().await;
         assert_eq!(scripts, vec![alpha, beta]);
     }
 }

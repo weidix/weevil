@@ -6,7 +6,7 @@ license.workspace = true
 
 [features]
 default = ["async", "json"]
-async = ["mlua/async"]
+async = ["mlua/async", "mlua/send"]
 json = ["dep:serde_json"]
 
 [dependencies]
@@ -20,3 +20,4 @@ weevil-core = { path = "../weevil-core" }
 
 [dev-dependencies]
 tracing-subscriber = { version = "0.3", features = ["fmt"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

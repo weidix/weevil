@@ -1,38 +1,43 @@
-use std::fs;
 use std::path::Path;
 
 use super::*;
 use crate::mode_params::FetchModeParams;
 
-fn touch(path: &Path) {
+async fn touch(path: &Path) {
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).expect("create parent");
+        tokio::fs::create_dir_all(parent)
+            .await
+            .expect("create parent");
     }
-    fs::write(path, b"data").expect("write file");
+    tokio::fs::write(path, b"data").await.expect("write file");
 }
 
-#[test]
-fn collect_video_files_respects_depth_zero() {
+#[tokio::test]
+async fn collect_video_files_respects_depth_zero() {
     let dir = tempfile::tempdir().expect("tempdir");
     let root = dir.path();
-    touch(&root.join("Movie.mkv"));
-    touch(&root.join("notes.txt"));
-    touch(&root.join("child").join("Other.mp4"));
+    touch(&root.join("Movie.mkv")).await;
+    touch(&root.join("notes.txt")).await;
+    touch(&root.join("child").join("Other.mp4")).await;
 
-    let mut files = collect_video_files(root, Some(0)).expect("collect files");
+    let mut files = collect_video_files(root, Some(0))
+        .await
+        .expect("collect files");
     files.sort();
     assert_eq!(files, vec![root.join("Movie.mkv")]);
 }
 
-#[test]
-fn collect_video_files_includes_subdir_depth_one() {
+#[tokio::test]
+async fn collect_video_files_includes_subdir_depth_one() {
     let dir = tempfile::tempdir().expect("tempdir");
     let root = dir.path();
-    touch(&root.join("Movie.mkv"));
-    touch(&root.join("child").join("Other.mp4"));
-    touch(&root.join("child").join("deep").join("Skip.avi"));
+    touch(&root.join("Movie.mkv")).await;
+    touch(&root.join("child").join("Other.mp4")).await;
+    touch(&root.join("child").join("deep").join("Skip.avi")).await;
 
-    let mut files = collect_video_files(root, Some(1)).expect("collect files");
+    let mut files = collect_video_files(root, Some(1))
+        .await
+        .expect("collect files");
     files.sort();
     assert_eq!(
         files,

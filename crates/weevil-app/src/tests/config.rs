@@ -3,14 +3,14 @@ use std::path::Path;
 use super::*;
 use tempfile::tempdir;
 
-#[test]
-fn load_default_when_missing_file() {
-    let config = AppConfig::load(Some(Path::new("/tmp/not-exists-weevil.toml")));
+#[tokio::test]
+async fn load_default_when_missing_file() {
+    let config = AppConfig::load(Some(Path::new("not-exists-weevil.toml"))).await;
     assert!(matches!(config, Err(AppError::ConfigRead { .. })));
 }
 
-#[test]
-fn parse_name_mode_from_name_section() {
+#[tokio::test]
+async fn parse_name_mode_from_name_section() {
     let config: AppConfig = toml::from_str(
         r#"
 [name]
@@ -22,6 +22,7 @@ output = "outputs/name.nfo"
 
     let resolved = config
         .resolve_name_with(&NameCliOverrides::default())
+        .await
         .expect("expected resolved name");
     assert_eq!(resolved.scripts, vec![Path::new("scripts/name.lua")]);
     assert_eq!(resolved.output, Path::new("outputs/name.nfo"));
@@ -30,8 +31,8 @@ output = "outputs/name.nfo"
     assert_eq!(resolved.multi_source_max_sources, 2);
 }
 
-#[test]
-fn resolve_name_mode_uses_shared_output() {
+#[tokio::test]
+async fn resolve_name_mode_uses_shared_output() {
     let config: AppConfig = toml::from_str(
         r#"
 [shared]
@@ -43,13 +44,14 @@ output = "outputs/name.nfo"
 
     let resolved = config
         .resolve_name_with(&NameCliOverrides::default())
+        .await
         .expect("expected resolved name");
     assert_eq!(resolved.scripts, vec![Path::new("scripts/shared.lua")]);
     assert_eq!(resolved.output, Path::new("outputs/name.nfo"));
 }
 
-#[test]
-fn resolve_file_mode_prefers_mode_over_shared() {
+#[tokio::test]
+async fn resolve_file_mode_prefers_mode_over_shared() {
     let config: AppConfig = toml::from_str(
         r#"
 [shared]
@@ -69,6 +71,7 @@ folder-multi = "soft-link"
 
     let resolved = config
         .resolve_file_mode_with(&ModeCliOverrides::default())
+        .await
         .expect("expected resolved file config");
     assert_eq!(resolved.scripts, vec![Path::new("scripts/file.lua")]);
     assert_eq!(resolved.output, "library/file/{title}");
@@ -82,8 +85,8 @@ folder-multi = "soft-link"
     assert_eq!(resolved.multi_source_max_sources, 2);
 }
 
-#[test]
-fn resolve_dir_mode_uses_shared_defaults() {
+#[tokio::test]
+async fn resolve_dir_mode_uses_shared_defaults() {
     let config: AppConfig = toml::from_str(
         r#"
 [shared]
@@ -101,6 +104,7 @@ input = "incoming"
 
     let resolved = config
         .resolve_dir_mode_with(&DirCliOverrides::default())
+        .await
         .expect("expected resolved dir config");
     assert_eq!(resolved.input, Path::new("incoming"));
     assert_eq!(resolved.mode.scripts, vec![Path::new("scripts/shared.lua")]);
@@ -114,8 +118,8 @@ input = "incoming"
     assert_eq!(resolved.max_depth, 2);
 }
 
-#[test]
-fn resolve_watch_mode_uses_mode_depth_override() {
+#[tokio::test]
+async fn resolve_watch_mode_uses_mode_depth_override() {
     let config: AppConfig = toml::from_str(
         r#"
 [shared]
@@ -132,13 +136,14 @@ max-depth = 1
 
     let resolved = config
         .resolve_watch_mode_with(&DirCliOverrides::default())
+        .await
         .expect("expected resolved watch config");
     assert_eq!(resolved.input, Path::new("incoming"));
     assert_eq!(resolved.max_depth, 1);
 }
 
-#[test]
-fn resolve_dir_mode_missing_input() {
+#[tokio::test]
+async fn resolve_dir_mode_missing_input() {
     let config: AppConfig = toml::from_str(
         r#"
 [shared]
@@ -150,6 +155,7 @@ output = "library/{title}"
 
     let err = config
         .resolve_dir_mode_with(&DirCliOverrides::default())
+        .await
         .expect_err("expected missing input");
     assert!(matches!(
         err,
@@ -160,8 +166,8 @@ output = "library/{title}"
     ));
 }
 
-#[test]
-fn resolve_file_mode_missing_script() {
+#[tokio::test]
+async fn resolve_file_mode_missing_script() {
     let config: AppConfig = toml::from_str(
         r#"
 [shared]
@@ -172,6 +178,7 @@ output = "library/{title}"
 
     let err = config
         .resolve_file_mode_with(&ModeCliOverrides::default())
+        .await
         .expect_err("expected missing script");
     assert!(matches!(
         err,
@@ -182,8 +189,8 @@ output = "library/{title}"
     ));
 }
 
-#[test]
-fn resolve_file_mode_missing_output() {
+#[tokio::test]
+async fn resolve_file_mode_missing_output() {
     let config: AppConfig = toml::from_str(
         r#"
 [shared]
@@ -194,6 +201,7 @@ script = "scripts/shared.lua"
 
     let err = config
         .resolve_file_mode_with(&ModeCliOverrides::default())
+        .await
         .expect_err("expected missing output");
     assert!(matches!(
         err,
@@ -204,8 +212,8 @@ script = "scripts/shared.lua"
     ));
 }
 
-#[test]
-fn parse_string_or_array_input_name_rules() {
+#[tokio::test]
+async fn parse_string_or_array_input_name_rules() {
     let config_string: AppConfig = toml::from_str(
         r#"
 [shared]
@@ -218,6 +226,7 @@ input-name-rule = "1080p,WEB-DL"
 
     let resolved_string = config_string
         .resolve_file_mode_with(&ModeCliOverrides::default())
+        .await
         .expect("expected resolved config");
     assert_eq!(resolved_string.input_name_rules, vec!["1080p,WEB-DL"]);
 
@@ -233,12 +242,13 @@ input-name-rule = ["1080p", "WEB-DL"]
 
     let resolved_array = config_array
         .resolve_file_mode_with(&ModeCliOverrides::default())
+        .await
         .expect("expected resolved config");
     assert_eq!(resolved_array.input_name_rules, vec!["1080p", "WEB-DL"]);
 }
 
-#[test]
-fn resolve_file_mode_cli_overrides_config() {
+#[tokio::test]
+async fn resolve_file_mode_cli_overrides_config() {
     let config: AppConfig = toml::from_str(
         r#"
 [shared]
@@ -264,6 +274,7 @@ folder-multi = "hard-link"
             multi_source_max_sources: Some(3),
             node_mapping_csv: Vec::new(),
         })
+        .await
         .expect("expected resolved config");
 
     assert_eq!(resolved.scripts, vec![Path::new("scripts/cli.lua")]);
@@ -278,8 +289,8 @@ folder-multi = "hard-link"
     assert_eq!(resolved.multi_source_max_sources, 3);
 }
 
-#[test]
-fn resolve_dir_mode_cli_overrides_config() {
+#[tokio::test]
+async fn resolve_dir_mode_cli_overrides_config() {
     let config: AppConfig = toml::from_str(
         r#"
 [shared]
@@ -312,6 +323,7 @@ max-depth = 2
             },
             max_depth: Some(1),
         })
+        .await
         .expect("expected resolved config");
 
     assert_eq!(resolved.input, Path::new("from-cli"));
@@ -326,8 +338,8 @@ max-depth = 2
     assert_eq!(resolved.max_depth, 1);
 }
 
-#[test]
-fn resolve_dir_mode_multithread_from_config() {
+#[tokio::test]
+async fn resolve_dir_mode_multithread_from_config() {
     let config: AppConfig = toml::from_str(
         r#"
 [shared]
@@ -345,6 +357,7 @@ throttle-same-script = true
 
     let resolved = config
         .resolve_dir_mode_with(&DirCliOverrides::default())
+        .await
         .expect("expected resolved dir config");
 
     assert_eq!(resolved.mode.fetch_threads, 6);
@@ -355,8 +368,8 @@ throttle-same-script = true
     assert_eq!(resolved.mode.multi_source_max_sources, 2);
 }
 
-#[test]
-fn resolve_name_mode_cli_overrides_config() {
+#[tokio::test]
+async fn resolve_name_mode_cli_overrides_config() {
     let config: AppConfig = toml::from_str(
         r#"
 [shared]
@@ -378,6 +391,7 @@ output = "from-name-config.nfo"
             multi_source_max_sources: Some(5),
             node_mapping_csv: Vec::new(),
         })
+        .await
         .expect("expected resolved name");
 
     assert_eq!(resolved.scripts, vec![Path::new("scripts/cli.lua")]);
@@ -387,8 +401,8 @@ output = "from-name-config.nfo"
     assert_eq!(resolved.multi_source_max_sources, 5);
 }
 
-#[test]
-fn resolve_name_mode_save_images_defaults_to_false() {
+#[tokio::test]
+async fn resolve_name_mode_save_images_defaults_to_false() {
     let config: AppConfig = toml::from_str(
         r#"
 [shared]
@@ -400,13 +414,14 @@ output = "from-config.nfo"
 
     let resolved = config
         .resolve_name_with(&NameCliOverrides::default())
+        .await
         .expect("resolved");
 
     assert!(!resolved.save_images);
 }
 
-#[test]
-fn resolve_file_mode_uses_scripts_list_from_config() {
+#[tokio::test]
+async fn resolve_file_mode_uses_scripts_list_from_config() {
     let config: AppConfig = toml::from_str(
         r#"
 [shared]
@@ -421,6 +436,7 @@ multi-source-max-sources = 6
 
     let resolved = config
         .resolve_file_mode_with(&ModeCliOverrides::default())
+        .await
         .expect("resolved");
 
     assert_eq!(
@@ -432,8 +448,8 @@ multi-source-max-sources = 6
     assert_eq!(resolved.multi_source_max_sources, 6);
 }
 
-#[test]
-fn resolve_mode_node_mapping_csv_uses_cli_over_config() {
+#[tokio::test]
+async fn resolve_mode_node_mapping_csv_uses_cli_over_config() {
     let config: AppConfig = toml::from_str(
         r#"
 [shared]
@@ -452,6 +468,7 @@ node-mapping-csv = "maps/file.csv"
             node_mapping_csv: vec!["maps/cli.csv".into()],
             ..ModeCliOverrides::default()
         })
+        .await
         .expect("resolved");
 
     assert_eq!(
@@ -460,8 +477,8 @@ node-mapping-csv = "maps/file.csv"
     );
 }
 
-#[test]
-fn resolve_name_node_mapping_csv_uses_mode_then_shared() {
+#[tokio::test]
+async fn resolve_name_node_mapping_csv_uses_mode_then_shared() {
     let config: AppConfig = toml::from_str(
         r#"
 [shared]
@@ -478,6 +495,7 @@ node-mapping-csv = "maps/name.csv"
 
     let resolved = config
         .resolve_name_with(&NameCliOverrides::default())
+        .await
         .expect("resolved");
 
     assert_eq!(
@@ -486,8 +504,8 @@ node-mapping-csv = "maps/name.csv"
     );
 }
 
-#[test]
-fn resolve_node_mapping_csv_accepts_list() {
+#[tokio::test]
+async fn resolve_node_mapping_csv_accepts_list() {
     let config: AppConfig = toml::from_str(
         r#"
 [shared]
@@ -503,6 +521,7 @@ output = "name.nfo"
 
     let resolved = config
         .resolve_name_with(&NameCliOverrides::default())
+        .await
         .expect("resolved");
 
     assert_eq!(
@@ -514,8 +533,8 @@ output = "name.nfo"
     );
 }
 
-#[test]
-fn resolve_file_mode_save_images_defaults_to_false() {
+#[tokio::test]
+async fn resolve_file_mode_save_images_defaults_to_false() {
     let config: AppConfig = toml::from_str(
         r#"
 [shared]
@@ -527,21 +546,28 @@ output = "library/{title}"
 
     let resolved = config
         .resolve_file_mode_with(&ModeCliOverrides::default())
+        .await
         .expect("resolved");
 
     assert!(!resolved.save_images);
 }
 
-#[test]
-fn resolve_file_mode_expands_script_glob_from_config() {
+#[tokio::test]
+async fn resolve_file_mode_expands_script_glob_from_config() {
     let dir = tempdir().expect("temp dir");
     let scripts_dir = dir.path().join("scripts");
-    std::fs::create_dir_all(scripts_dir.join("nested")).expect("create scripts dir");
+    tokio::fs::create_dir_all(scripts_dir.join("nested"))
+        .await
+        .expect("create scripts dir");
 
     let alpha = scripts_dir.join("alpha.lua");
     let beta = scripts_dir.join("nested").join("beta.lua");
-    std::fs::write(&alpha, "return {} ").expect("write alpha");
-    std::fs::write(&beta, "return {} ").expect("write beta");
+    tokio::fs::write(&alpha, "return {} ")
+        .await
+        .expect("write alpha");
+    tokio::fs::write(&beta, "return {} ")
+        .await
+        .expect("write beta");
 
     let config: AppConfig = toml::from_str(&format!(
         r#"
@@ -556,13 +582,14 @@ output = "library/{{title}}"
 
     let resolved = config
         .resolve_file_mode_with(&ModeCliOverrides::default())
+        .await
         .expect("resolve config");
 
     assert_eq!(resolved.scripts, vec![alpha, beta]);
 }
 
-#[test]
-fn resolve_file_mode_keeps_unmatched_glob_literal() {
+#[tokio::test]
+async fn resolve_file_mode_keeps_unmatched_glob_literal() {
     let config: AppConfig = toml::from_str(
         r#"
 [shared]
@@ -574,6 +601,7 @@ output = "library/{title}"
 
     let resolved = config
         .resolve_file_mode_with(&ModeCliOverrides::default())
+        .await
         .expect("resolve config");
 
     assert_eq!(resolved.scripts, vec![Path::new("scripts/missing/*.lua")]);

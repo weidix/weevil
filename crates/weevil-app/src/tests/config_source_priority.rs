@@ -1,7 +1,7 @@
 use super::*;
 
-#[test]
-fn resolve_file_mode_source_priority_from_mode_over_shared() {
+#[tokio::test]
+async fn resolve_file_mode_source_priority_from_mode_over_shared() {
     let config: AppConfig = toml::from_str(
         r#"
 [shared]
@@ -20,14 +20,15 @@ details = ["source.file"]
 
     let resolved = config
         .resolve_file_mode_with(&ModeCliOverrides::default())
+        .await
         .expect("resolved");
 
     assert_eq!(resolved.source_priority.details(), ["source.file"]);
     assert_eq!(resolved.source_priority.images(), ["source.shared"]);
 }
 
-#[test]
-fn resolve_name_mode_source_priority_from_shared() {
+#[tokio::test]
+async fn resolve_name_mode_source_priority_from_shared() {
     let config: AppConfig = toml::from_str(
         r#"
 [shared]
@@ -43,14 +44,15 @@ details = ["source.details"]
 
     let resolved = config
         .resolve_name_with(&NameCliOverrides::default())
+        .await
         .expect("resolved");
 
     assert_eq!(resolved.source_priority.details(), ["source.details"]);
     assert_eq!(resolved.source_priority.images(), ["source.images"]);
 }
 
-#[test]
-fn resolve_file_mode_source_priority_defaults_empty() {
+#[tokio::test]
+async fn resolve_file_mode_source_priority_defaults_empty() {
     let config: AppConfig = toml::from_str(
         r#"
 [shared]
@@ -62,6 +64,7 @@ output = "library/{title}"
 
     let resolved = config
         .resolve_file_mode_with(&ModeCliOverrides::default())
+        .await
         .expect("resolved");
 
     assert!(resolved.source_priority.details().is_empty());

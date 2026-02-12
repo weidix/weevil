@@ -4,8 +4,8 @@ use crate::image_store::localize_movie_images;
 use crate::mode_params::{FileModeParams, MultiFolderStrategy};
 use crate::source_runner;
 use crate::video_parts::{self, VideoInputGroup, VideoInputPart};
-use std::fs;
 use std::path::{Path, PathBuf};
+use tokio::fs;
 
 mod fs_ops;
 mod input_name;
@@ -19,7 +19,7 @@ pub(crate) use subtitle_match::subtitle_suffix;
 
 const SUBTITLE_EXTENSIONS: &[&str] = &["srt", "ass", "ssa", "vtt", "sub", "idx", "sup"];
 
-pub(crate) fn run_file_mode_inputs(
+pub(crate) async fn run_file_mode_inputs(
     inputs: &[PathBuf],
     params: &FileModeParams,
 ) -> Result<(), AppError> {
@@ -31,17 +31,17 @@ pub(crate) fn run_file_mode_inputs(
     }
 
     for group in &groups {
-        run_file_mode_group(group, params)?;
+        run_file_mode_group(group, params).await?;
     }
     Ok(())
 }
 
-pub(crate) fn run_file_mode_group(
+pub(crate) async fn run_file_mode_group(
     group: &VideoInputGroup,
     params: &FileModeParams,
 ) -> Result<(), AppError> {
     for part in &group.parts {
-        ensure_input_file(&part.path)?;
+        ensure_input_file(&part.path).await?;
     }
     let input_name = format_input_name(&group.input_stem, params.input_name_rules())?;
     let input_path = path_to_string(&group.primary_path)?;
@@ -57,7 +57,8 @@ pub(crate) fn run_file_mode_group(
         params.node_value_mapper(),
         input_name.as_str(),
         input_path.as_str(),
-    )?;
+    )
+    .await?;
     let mut movie = source_output.movie;
 
     let output_paths = format_output_paths(params.output_template(), &movie, &group.input_stem)?;
@@ -69,9 +70,9 @@ pub(crate) fn run_file_mode_group(
     let primary_output = selected.primary;
     let extra_outputs = selected.extras;
 
-    ensure_output_dir(&primary_output.dir)?;
+    ensure_output_dir(&primary_output.dir).await?;
     for output in &extra_outputs {
-        ensure_output_dir(&output.dir)?;
+        ensure_output_dir(&output.dir).await?;
     }
 
     let (localized_images, xml_output) = if params.save_images() {
@@ -80,7 +81,8 @@ pub(crate) fn run_file_mode_group(
             &primary_output.dir,
             &primary_output.file_base,
             &source_output.trusted_urls,
-        )?;
+        )
+        .await?;
         let xml_output = if localized_images.is_empty() && !source_output.merged_sources {
             source_output.xml
         } else {
@@ -96,7 +98,7 @@ pub(crate) fn run_file_mode_group(
         (Vec::new(), xml_output)
     };
 
-    let subtitle_plans = collect_group_subtitle_plans(group)?;
+    let subtitle_plans = collect_group_subtitle_plans(group).await?;
 
     let primary_targets = build_output_targets(
         &primary_output,
@@ -113,7 +115,7 @@ pub(crate) fn run_file_mode_group(
 
     let moves = build_moves_for_group(group, &primary_output, &subtitle_plans)?;
 
-    preflight_moves(&moves)?;
+    preflight_moves(&moves).await?;
     let mut link_targets = Vec::with_capacity(
         1 + extra_targets.len() * (2 + group.parts.len() + localized_images.len()),
     );
@@ -124,23 +126,25 @@ pub(crate) fn run_file_mode_group(
         link_targets.extend(targets.subtitles.iter().map(|item| item.path.clone()));
         link_targets.extend(targets.images.iter().cloned());
     }
-    preflight_output_paths(&link_targets)?;
+    preflight_output_paths(&link_targets).await?;
 
     for item in moves {
-        move_locked_file(&item.from, &item.to)?;
+        move_locked_file(&item.from, &item.to).await?;
     }
 
-    fs::write(&primary_targets.nfo, xml_output).map_err(|err| AppError::OutputWrite {
-        path: primary_targets.nfo.clone(),
-        source: err,
-    })?;
+    fs::write(&primary_targets.nfo, xml_output)
+        .await
+        .map_err(|err| AppError::OutputWrite {
+            path: primary_targets.nfo.clone(),
+            source: err,
+        })?;
 
     if matches!(
         params.folder_multi(),
         MultiFolderStrategy::HardLink | MultiFolderStrategy::SoftLink
     ) {
         for targets in &extra_targets {
-            create_links(params.folder_multi(), &primary_targets, targets)?;
+            create_links(params.folder_multi(), &primary_targets, targets).await?;
         }
     }
 
@@ -213,20 +217,24 @@ fn split_output_path(path: &Path, template: &str) -> Result<OutputPath, AppError
     Ok(OutputPath { dir, file_base })
 }
 
-fn ensure_output_dir(dir: &Path) -> Result<(), AppError> {
+async fn ensure_output_dir(dir: &Path) -> Result<(), AppError> {
     if dir.as_os_str().is_empty() {
         return Ok(());
     }
-    fs::create_dir_all(dir).map_err(|err| AppError::OutputDirCreate {
-        path: dir.to_path_buf(),
-        source: err,
-    })
+    fs::create_dir_all(dir)
+        .await
+        .map_err(|err| AppError::OutputDirCreate {
+            path: dir.to_path_buf(),
+            source: err,
+        })
 }
-fn ensure_input_file(input: &Path) -> Result<(), AppError> {
-    let metadata = fs::metadata(input).map_err(|err| AppError::InputMetadata {
-        path: input.to_path_buf(),
-        source: err,
-    })?;
+async fn ensure_input_file(input: &Path) -> Result<(), AppError> {
+    let metadata = fs::metadata(input)
+        .await
+        .map_err(|err| AppError::InputMetadata {
+            path: input.to_path_buf(),
+            source: err,
+        })?;
     if !metadata.is_file() {
         return Err(AppError::InputNotFile {
             path: input.to_path_buf(),
@@ -253,19 +261,24 @@ fn extension_string(path: &Path) -> Result<Option<String>, AppError> {
     }
 }
 
-fn find_subtitles(input: &Path, input_stem: &str) -> Result<Vec<SubtitleMatch>, AppError> {
+async fn find_subtitles(input: &Path, input_stem: &str) -> Result<Vec<SubtitleMatch>, AppError> {
     let parent = input.parent().unwrap_or_else(|| Path::new("."));
-    let entries = fs::read_dir(parent).map_err(|err| AppError::SubtitleScan {
-        path: parent.to_path_buf(),
-        source: err,
-    })?;
-
-    let mut matches = Vec::new();
-    for entry in entries {
-        let entry = entry.map_err(|err| AppError::SubtitleScan {
+    let mut entries = fs::read_dir(parent)
+        .await
+        .map_err(|err| AppError::SubtitleScan {
             path: parent.to_path_buf(),
             source: err,
         })?;
+
+    let mut matches = Vec::new();
+    while let Some(entry) = entries
+        .next_entry()
+        .await
+        .map_err(|err| AppError::SubtitleScan {
+            path: parent.to_path_buf(),
+            source: err,
+        })?
+    {
         let path = entry.path();
         if path == input {
             continue;
@@ -344,12 +357,12 @@ fn build_output_targets(
     })
 }
 
-fn preflight_moves(moves: &[MoveItem]) -> Result<(), AppError> {
+async fn preflight_moves(moves: &[MoveItem]) -> Result<(), AppError> {
     for item in moves {
         if item.from == item.to {
             continue;
         }
-        if item.to.exists() {
+        if path_exists(&item.to).await? {
             return Err(AppError::OutputPathExists {
                 path: item.to.clone(),
             });
@@ -358,20 +371,20 @@ fn preflight_moves(moves: &[MoveItem]) -> Result<(), AppError> {
     Ok(())
 }
 
-fn preflight_output_paths(paths: &[PathBuf]) -> Result<(), AppError> {
+async fn preflight_output_paths(paths: &[PathBuf]) -> Result<(), AppError> {
     let mut seen = std::collections::HashSet::new();
     for path in paths {
         if !seen.insert(path.clone()) {
             continue;
         }
-        if path.exists() {
+        if path_exists(path).await? {
             return Err(AppError::OutputPathExists { path: path.clone() });
         }
     }
     Ok(())
 }
 
-fn create_links(
+async fn create_links(
     strategy: MultiFolderStrategy,
     primary: &OutputTargets,
     targets: &OutputTargets,
@@ -385,7 +398,7 @@ fn create_links(
         "video target length mismatch"
     );
     for (from, to) in primary.videos.iter().zip(targets.videos.iter()) {
-        create_link(strategy, from, to)?;
+        create_link(strategy, from, to).await?;
     }
     assert_eq!(
         primary.subtitles.len(),
@@ -394,7 +407,7 @@ fn create_links(
     );
     for (from, to) in primary.subtitles.iter().zip(targets.subtitles.iter()) {
         assert_eq!(from.sort_key, to.sort_key, "subtitle link order mismatch");
-        create_link(strategy, &from.path, &to.path)?;
+        create_link(strategy, &from.path, &to.path).await?;
     }
     assert_eq!(
         primary.images.len(),
@@ -402,10 +415,18 @@ fn create_links(
         "image target length mismatch"
     );
     for (from, to) in primary.images.iter().zip(targets.images.iter()) {
-        create_link(strategy, from, to)?;
+        create_link(strategy, from, to).await?;
     }
-    create_link(strategy, &primary.nfo, &targets.nfo)?;
+    create_link(strategy, &primary.nfo, &targets.nfo).await?;
     Ok(())
+}
+
+async fn path_exists(path: &Path) -> Result<bool, AppError> {
+    fs::try_exists(path)
+        .await
+        .map_err(|err| AppError::FetchRuntime {
+            reason: format!("failed to inspect output path {path:?}: {err}"),
+        })
 }
 
 fn build_moves_for_group(
@@ -439,14 +460,16 @@ fn build_moves_for_group(
     Ok(moves)
 }
 
-fn collect_group_subtitle_plans(group: &VideoInputGroup) -> Result<Vec<SubtitlePlan>, AppError> {
+async fn collect_group_subtitle_plans(
+    group: &VideoInputGroup,
+) -> Result<Vec<SubtitlePlan>, AppError> {
     let mut plans = Vec::new();
     let mut seen = std::collections::HashSet::new();
     let split_group = group.parts.len() > 1;
 
     for part in &group.parts {
         let part_base = part.output_suffix.clone();
-        let subtitles = find_subtitles(&part.path, &part.input_stem)?;
+        let subtitles = find_subtitles(&part.path, &part.input_stem).await?;
         for subtitle in subtitles {
             if split_group && !subtitle_has_split_marker(&subtitle.path)? {
                 continue;
@@ -462,7 +485,7 @@ fn collect_group_subtitle_plans(group: &VideoInputGroup) -> Result<Vec<SubtitleP
         }
     }
 
-    let group_subtitles = find_group_subtitles(group)?;
+    let group_subtitles = find_group_subtitles(group).await?;
     for subtitle in group_subtitles {
         if seen.insert(subtitle.path.clone()) {
             plans.push(SubtitlePlan {
@@ -477,22 +500,27 @@ fn collect_group_subtitle_plans(group: &VideoInputGroup) -> Result<Vec<SubtitleP
     Ok(plans)
 }
 
-fn find_group_subtitles(group: &VideoInputGroup) -> Result<Vec<SubtitleMatch>, AppError> {
+async fn find_group_subtitles(group: &VideoInputGroup) -> Result<Vec<SubtitleMatch>, AppError> {
     let parent = group
         .primary_path
         .parent()
         .unwrap_or_else(|| Path::new("."));
-    let entries = fs::read_dir(parent).map_err(|err| AppError::SubtitleScan {
-        path: parent.to_path_buf(),
-        source: err,
-    })?;
-
-    let mut matches = Vec::new();
-    for entry in entries {
-        let entry = entry.map_err(|err| AppError::SubtitleScan {
+    let mut entries = fs::read_dir(parent)
+        .await
+        .map_err(|err| AppError::SubtitleScan {
             path: parent.to_path_buf(),
             source: err,
         })?;
+
+    let mut matches = Vec::new();
+    while let Some(entry) = entries
+        .next_entry()
+        .await
+        .map_err(|err| AppError::SubtitleScan {
+            path: parent.to_path_buf(),
+            source: err,
+        })?
+    {
         let path = entry.path();
         if !is_subtitle_path(&path) {
             continue;

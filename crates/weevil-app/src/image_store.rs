@@ -1,12 +1,13 @@
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
+use tokio::fs;
 use weevil_lua::{HttpClient, HttpRequestOptions, TrustedUrl};
 
 use crate::errors::AppError;
 use crate::nfo::{Movie, Thumb};
 
-pub(crate) fn localize_movie_images(
+pub(crate) async fn localize_movie_images(
     movie: &mut Movie,
     target_dir: &Path,
     file_base: &str,
@@ -15,20 +16,28 @@ pub(crate) fn localize_movie_images(
     let client = HttpClient::new(trusted_urls.to_vec()).map_err(AppError::LuaPlugin)?;
     let options = HttpRequestOptions::default();
     localize_movie_images_with_fetcher(movie, target_dir, file_base, |url| {
-        client
-            .get_bytes_blocking(url, &options)
-            .map_err(AppError::LuaPlugin)
+        let url = url.to_string();
+        let client = client.clone();
+        let options = options.clone();
+        async move {
+            client
+                .get_bytes_async(&url, &options)
+                .await
+                .map_err(AppError::LuaPlugin)
+        }
     })
+    .await
 }
 
-fn localize_movie_images_with_fetcher<F>(
+async fn localize_movie_images_with_fetcher<F, Fut>(
     movie: &mut Movie,
     target_dir: &Path,
     file_base: &str,
     mut fetcher: F,
 ) -> Result<Vec<String>, AppError>
 where
-    F: FnMut(&str) -> Result<Vec<u8>, AppError>,
+    F: FnMut(&str) -> Fut,
+    Fut: std::future::Future<Output = Result<Vec<u8>, AppError>>,
 {
     let mut state = LocalizeState::new(target_dir);
 
@@ -38,7 +47,8 @@ where
             &format!("{file_base}-poster"),
             &mut state,
             &mut fetcher,
-        )?;
+        )
+        .await?;
     }
 
     if let Some(fanart) = movie.fanart.as_mut() {
@@ -48,40 +58,43 @@ where
             } else {
                 format!("{file_base}-fanart-{}", index + 1)
             };
-            localize_thumb(thumb, &name, &mut state, &mut fetcher)?;
+            localize_thumb(thumb, &name, &mut state, &mut fetcher).await?;
         }
     }
 
     Ok(state.local_files)
 }
 
-fn localize_thumb<F>(
+async fn localize_thumb<F, Fut>(
     thumb: &mut Thumb,
     base_name: &str,
     state: &mut LocalizeState<'_>,
     fetcher: &mut F,
 ) -> Result<(), AppError>
 where
-    F: FnMut(&str) -> Result<Vec<u8>, AppError>,
+    F: FnMut(&str) -> Fut,
+    Fut: std::future::Future<Output = Result<Vec<u8>, AppError>>,
 {
-    localize_field(&mut thumb.value, base_name, state, fetcher)?;
+    localize_field(&mut thumb.value, base_name, state, fetcher).await?;
     localize_field(
         &mut thumb.preview,
         &format!("{base_name}-preview"),
         state,
         fetcher,
-    )?;
+    )
+    .await?;
     Ok(())
 }
 
-fn localize_field<F>(
+async fn localize_field<F, Fut>(
     field: &mut Option<String>,
     base_name: &str,
     state: &mut LocalizeState<'_>,
     fetcher: &mut F,
 ) -> Result<(), AppError>
 where
-    F: FnMut(&str) -> Result<Vec<u8>, AppError>,
+    F: FnMut(&str) -> Fut,
+    Fut: std::future::Future<Output = Result<Vec<u8>, AppError>>,
 {
     let Some(value) = field.as_deref() else {
         return Ok(());
@@ -94,7 +107,7 @@ where
     if !is_https_url(value) {
         return Ok(());
     }
-    let local_name = state.resolve(value, base_name, fetcher)?;
+    let local_name = state.resolve(value, base_name, fetcher).await?;
     *field = Some(local_name);
     Ok(())
 }
@@ -145,14 +158,15 @@ impl<'a> LocalizeState<'a> {
         }
     }
 
-    fn resolve<F>(
+    async fn resolve<F, Fut>(
         &mut self,
         remote_url: &str,
         base_name: &str,
         fetcher: &mut F,
     ) -> Result<String, AppError>
     where
-        F: FnMut(&str) -> Result<Vec<u8>, AppError>,
+        F: FnMut(&str) -> Fut,
+        Fut: std::future::Future<Output = Result<Vec<u8>, AppError>>,
     {
         if let Some(local_name) = self.url_to_local.get(remote_url) {
             return Ok(local_name.clone());
@@ -161,12 +175,19 @@ impl<'a> LocalizeState<'a> {
         let extension = infer_extension(remote_url);
         let local_name = self.allocate_name(base_name, &extension);
         let local_path = self.target_dir.join(&local_name);
-        if !local_path.exists() {
-            let content = fetcher(remote_url)?;
-            std::fs::write(&local_path, content).map_err(|source| AppError::OutputWrite {
-                path: local_path.clone(),
-                source,
-            })?;
+        if !fs::try_exists(&local_path)
+            .await
+            .map_err(|source| AppError::FetchRuntime {
+                reason: format!("failed to inspect image output path {local_path:?}: {source}"),
+            })?
+        {
+            let content = fetcher(remote_url).await?;
+            fs::write(&local_path, content)
+                .await
+                .map_err(|source| AppError::OutputWrite {
+                    path: local_path.clone(),
+                    source,
+                })?;
         }
 
         self.url_to_local
@@ -196,7 +217,8 @@ impl<'a> LocalizeState<'a> {
 
 #[cfg(test)]
 mod tests {
-    use std::cell::RefCell;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     use tempfile::tempdir;
 
@@ -206,8 +228,8 @@ mod tests {
         Some(url.to_string())
     }
 
-    #[test]
-    fn localize_downloads_each_remote_image_once() {
+    #[tokio::test]
+    async fn localize_downloads_each_remote_image_once() {
         let dir = tempdir().expect("temp dir");
         let mut movie = Movie {
             thumb: Some(Thumb {
@@ -224,16 +246,23 @@ mod tests {
             ..Movie::default()
         };
 
-        let call_count = RefCell::new(0usize);
-        let files =
-            localize_movie_images_with_fetcher(&mut movie, dir.path(), "Movie", |url: &str| {
-                assert_eq!(url, "https://img.example/poster.jpg");
-                *call_count.borrow_mut() += 1;
-                Ok(vec![1, 2, 3])
-            })
-            .expect("localize");
+        let call_count = Arc::new(AtomicUsize::new(0));
+        let files = localize_movie_images_with_fetcher(&mut movie, dir.path(), "Movie", {
+            let call_count = Arc::clone(&call_count);
+            move |url: &str| {
+                let url = url.to_string();
+                let call_count = Arc::clone(&call_count);
+                async move {
+                    assert_eq!(url, "https://img.example/poster.jpg");
+                    call_count.fetch_add(1, Ordering::SeqCst);
+                    Ok(vec![1, 2, 3])
+                }
+            }
+        })
+        .await
+        .expect("localize");
 
-        assert_eq!(*call_count.borrow(), 1);
+        assert_eq!(call_count.load(Ordering::SeqCst), 1);
         assert_eq!(files, vec!["Movie-poster.jpg".to_string()]);
         assert_eq!(
             movie.thumb.as_ref().and_then(|thumb| thumb.value.clone()),
@@ -247,14 +276,20 @@ mod tests {
                 .and_then(|thumb| thumb.value.clone()),
             files.first().cloned()
         );
-        assert!(dir.path().join("Movie-poster.jpg").exists());
+        assert!(
+            tokio::fs::try_exists(dir.path().join("Movie-poster.jpg"))
+                .await
+                .expect("exists")
+        );
     }
 
-    #[test]
-    fn localize_skips_network_when_local_file_exists() {
+    #[tokio::test]
+    async fn localize_skips_network_when_local_file_exists() {
         let dir = tempdir().expect("temp dir");
         let existing = dir.path().join("Movie-poster.jpg");
-        std::fs::write(&existing, [9, 8, 7]).expect("seed file");
+        tokio::fs::write(&existing, [9, 8, 7])
+            .await
+            .expect("seed file");
 
         let mut movie = Movie {
             thumb: Some(Thumb {
@@ -264,25 +299,31 @@ mod tests {
             ..Movie::default()
         };
 
-        let call_count = RefCell::new(0usize);
-        let files =
-            localize_movie_images_with_fetcher(&mut movie, dir.path(), "Movie", |_url: &str| {
-                *call_count.borrow_mut() += 1;
-                Ok(vec![1, 2, 3])
-            })
-            .expect("localize");
+        let call_count = Arc::new(AtomicUsize::new(0));
+        let files = localize_movie_images_with_fetcher(&mut movie, dir.path(), "Movie", {
+            let call_count = Arc::clone(&call_count);
+            move |_url: &str| {
+                let call_count = Arc::clone(&call_count);
+                async move {
+                    call_count.fetch_add(1, Ordering::SeqCst);
+                    Ok(vec![1, 2, 3])
+                }
+            }
+        })
+        .await
+        .expect("localize");
 
-        assert_eq!(*call_count.borrow(), 0);
+        assert_eq!(call_count.load(Ordering::SeqCst), 0);
         assert_eq!(files, vec!["Movie-poster.jpg".to_string()]);
         assert_eq!(
-            std::fs::read(existing).expect("read existing"),
+            tokio::fs::read(existing).await.expect("read existing"),
             vec![9, 8, 7],
             "existing local file should be reused"
         );
     }
 
-    #[test]
-    fn localize_keeps_non_remote_fields_unchanged() {
+    #[tokio::test]
+    async fn localize_keeps_non_remote_fields_unchanged() {
         let dir = tempdir().expect("temp dir");
         let mut movie = Movie {
             thumb: Some(Thumb {
@@ -293,11 +334,14 @@ mod tests {
             ..Movie::default()
         };
 
-        let files =
-            localize_movie_images_with_fetcher(&mut movie, dir.path(), "Movie", |_url: &str| {
-                panic!("fetcher should not be called")
-            })
-            .expect("localize");
+        let files = localize_movie_images_with_fetcher(
+            &mut movie,
+            dir.path(),
+            "Movie",
+            |_url: &str| async move { panic!("fetcher should not be called") },
+        )
+        .await
+        .expect("localize");
 
         assert!(files.is_empty());
         assert_eq!(
@@ -310,8 +354,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn localize_rejects_http_image_url() {
+    #[tokio::test]
+    async fn localize_rejects_http_image_url() {
         let dir = tempdir().expect("temp dir");
         let mut movie = Movie {
             thumb: Some(Thumb {
@@ -321,11 +365,14 @@ mod tests {
             ..Movie::default()
         };
 
-        let error =
-            localize_movie_images_with_fetcher(&mut movie, dir.path(), "Movie", |_url: &str| {
-                panic!("fetcher should not be called for http")
-            })
-            .expect_err("http image url should be rejected");
+        let error = localize_movie_images_with_fetcher(
+            &mut movie,
+            dir.path(),
+            "Movie",
+            |_url: &str| async move { panic!("fetcher should not be called for http") },
+        )
+        .await
+        .expect_err("http image url should be rejected");
 
         match error {
             AppError::ImageHttpNotAllowed { url } => {

@@ -1,9 +1,12 @@
+use std::future::Future;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use tokio::sync::Semaphore;
+use tokio::task::JoinSet;
+use tokio::time::sleep;
 use tracing::info;
 
 use crate::errors::AppError;
@@ -12,33 +15,21 @@ use crate::mode_params::{FetchModeParams, FileModeParams};
 
 const SCRIPT_THROTTLE_SPAN_MS: u64 = 200;
 
-#[derive(Debug)]
-struct ScriptThrottleState {
-    has_previous_task: bool,
-}
-
-impl ScriptThrottleState {
-    fn new() -> Self {
-        Self {
-            has_previous_task: false,
-        }
-    }
-}
-
 pub(crate) type FetchTaskResult = (Vec<PathBuf>, Result<(), String>);
 
-pub(crate) fn preflight_script(
+pub(crate) async fn preflight_script(
     fetch: &FetchModeParams,
     script_paths: &[PathBuf],
 ) -> Result<(), AppError> {
-    preflight_script_for_multithread(fetch, script_paths)
+    preflight_script_for_multithread(fetch, script_paths).await
 }
-pub(crate) fn run_batch_fetch(
+
+pub(crate) async fn run_batch_fetch(
     groups: Vec<Vec<PathBuf>>,
     params: &FileModeParams,
     fetch: &FetchModeParams,
 ) -> Result<(), AppError> {
-    preflight_script_for_multithread(fetch, params.scripts())?;
+    preflight_script_for_multithread(fetch, params.scripts()).await?;
 
     if groups.is_empty() {
         return Ok(());
@@ -50,10 +41,11 @@ pub(crate) fn run_batch_fetch(
             params,
             fetch.throttle_same_script(),
             fetch.script_throttle_base_ms(),
-        );
+        )
+        .await;
     }
 
-    let results = run_batch_fetch_with_results(groups, params, fetch)?;
+    let results = run_batch_fetch_with_results(groups, params, fetch).await?;
     for (group, result) in results {
         if let Err(reason) = result {
             return Err(AppError::FetchRuntime {
@@ -64,7 +56,7 @@ pub(crate) fn run_batch_fetch(
     Ok(())
 }
 
-fn run_serial_for_dir(
+async fn run_serial_for_dir(
     groups: Vec<Vec<PathBuf>>,
     params: &FileModeParams,
     throttle_same_script: bool,
@@ -73,15 +65,15 @@ fn run_serial_for_dir(
     let mut has_previous = false;
     for group in groups {
         if throttle_same_script && has_previous {
-            throttle_script_execution(throttle_base_ms);
+            throttle_script_execution(throttle_base_ms).await;
         }
-        file_mode::run_file_mode_inputs(&group, params)?;
+        file_mode::run_file_mode_inputs(&group, params).await?;
         has_previous = true;
     }
     Ok(())
 }
 
-pub(crate) fn run_batch_fetch_with_results(
+pub(crate) async fn run_batch_fetch_with_results(
     groups: Vec<Vec<PathBuf>>,
     params: &FileModeParams,
     fetch: &FetchModeParams,
@@ -96,213 +88,197 @@ pub(crate) fn run_batch_fetch_with_results(
             params,
             fetch.throttle_same_script(),
             fetch.script_throttle_base_ms(),
-        ))
+        )
+        .await)
     } else {
-        run_parallel(groups, params, fetch)
+        run_parallel(groups, params, fetch).await
     }
 }
 
-fn run_serial(
+async fn run_serial(
     groups: Vec<Vec<PathBuf>>,
     params: &FileModeParams,
     throttle_same_script: bool,
     throttle_base_ms: u64,
 ) -> Vec<FetchTaskResult> {
     let execute = |inputs: &[PathBuf]| {
-        file_mode::run_file_mode_inputs(inputs, params).map_err(|err| err.to_string())
+        let inputs = inputs.to_vec();
+        async move {
+            file_mode::run_file_mode_inputs(&inputs, params)
+                .await
+                .map_err(|err| err.to_string())
+        }
     };
-    run_serial_with_executor(groups, throttle_same_script, throttle_base_ms, &execute)
+    run_serial_with_executor(groups, throttle_same_script, throttle_base_ms, &execute).await
 }
 
-fn run_serial_with_executor<F>(
+async fn run_serial_with_executor<F, Fut>(
     groups: Vec<Vec<PathBuf>>,
     throttle_same_script: bool,
     throttle_base_ms: u64,
     execute: &F,
 ) -> Vec<FetchTaskResult>
 where
-    F: Fn(&[PathBuf]) -> Result<(), String>,
+    F: Fn(&[PathBuf]) -> Fut,
+    Fut: Future<Output = Result<(), String>>,
 {
     let mut results = Vec::with_capacity(groups.len());
     let mut has_previous = false;
     for group in groups {
         if throttle_same_script && has_previous {
-            throttle_script_execution(throttle_base_ms);
+            throttle_script_execution(throttle_base_ms).await;
         }
-        let result = execute(&group);
+        let result = execute(&group).await;
         results.push((group, result));
         has_previous = true;
     }
     results
 }
 
-fn run_parallel(
+async fn run_parallel(
     groups: Vec<Vec<PathBuf>>,
     params: &FileModeParams,
     fetch: &FetchModeParams,
 ) -> Result<Vec<FetchTaskResult>, AppError> {
-    let execute = |inputs: &[PathBuf]| {
-        file_mode::run_file_mode_inputs(inputs, params).map_err(|err| err.to_string())
+    let params = params.clone();
+    let fetch = *fetch;
+    let execute = move |inputs: &[PathBuf]| {
+        let inputs = inputs.to_vec();
+        let params = params.clone();
+        async move {
+            file_mode::run_file_mode_inputs(&inputs, &params)
+                .await
+                .map_err(|err| err.to_string())
+        }
     };
-    run_parallel_with_executor(groups, fetch, &execute)
+    run_parallel_with_executor(groups, &fetch, execute).await
 }
 
-fn run_parallel_with_executor<F>(
+async fn run_parallel_with_executor<F, Fut>(
     groups: Vec<Vec<PathBuf>>,
     fetch: &FetchModeParams,
-    execute: &F,
+    execute: F,
 ) -> Result<Vec<FetchTaskResult>, AppError>
 where
-    F: Fn(&[PathBuf]) -> Result<(), String> + Sync,
+    F: Fn(&[PathBuf]) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = Result<(), String>> + Send + 'static,
 {
+    let fetch = *fetch;
     let worker_count = effective_worker_count(fetch.fetch_threads(), groups.len());
     if worker_count <= 1 {
         return Ok(run_serial_with_executor(
             groups,
             fetch.throttle_same_script(),
             fetch.script_throttle_base_ms(),
-            execute,
-        ));
+            &execute,
+        )
+        .await);
     }
 
-    let input_queue = Arc::new(std::sync::Mutex::new(groups.into_iter()));
-    let runtime_error = Arc::new(std::sync::Mutex::new(None::<String>));
-    let results = Arc::new(std::sync::Mutex::new(Vec::<FetchTaskResult>::new()));
-    let stop_flag = Arc::new(AtomicBool::new(false));
-    let script_gate = if fetch.throttle_same_script() {
-        Some(Arc::new(std::sync::Mutex::new(ScriptThrottleState::new())))
+    let execute = Arc::new(execute);
+    let throttle = if fetch.throttle_same_script() {
+        Some(Arc::new(ScriptThrottle::new()))
     } else {
         None
     };
+    let throttle_base_ms = fetch.script_throttle_base_ms();
+    let mut join_set: JoinSet<FetchTaskResult> = JoinSet::new();
+    let mut results = Vec::with_capacity(groups.len());
+    let mut pending = 0usize;
+    let mut stop_spawning = false;
+    let mut iter = groups.into_iter();
 
-    thread::scope(|scope| {
-        for _ in 0..worker_count {
-            let queue = Arc::clone(&input_queue);
-            let error_slot = Arc::clone(&runtime_error);
-            let output = Arc::clone(&results);
-            let stop = Arc::clone(&stop_flag);
-            let throttle_base_ms = fetch.script_throttle_base_ms();
-            let gate = script_gate.clone();
-            let execute = execute;
-            scope.spawn(move || {
-                worker_loop(
-                    queue,
-                    gate,
-                    execute,
-                    output,
-                    error_slot,
-                    stop,
-                    throttle_base_ms,
-                );
-            });
+    for _ in 0..worker_count {
+        if let Some(group) = iter.next() {
+            spawn_task(
+                &mut join_set,
+                Arc::clone(&execute),
+                throttle.clone(),
+                throttle_base_ms,
+                group,
+            );
+            pending += 1;
         }
-    });
-
-    let mut error_guard = runtime_error.lock().map_err(|_| AppError::FetchRuntime {
-        reason: "failed to read worker error state".to_string(),
-    })?;
-    if let Some(reason) = error_guard.take() {
-        return Err(AppError::FetchRuntime { reason });
     }
 
-    let mut output = results.lock().map_err(|_| AppError::FetchRuntime {
-        reason: "failed to read worker results".to_string(),
-    })?;
-    Ok(std::mem::take(&mut *output))
+    while pending > 0 {
+        match join_set.join_next().await {
+            Some(Ok(result)) => {
+                if result.1.is_err() {
+                    stop_spawning = true;
+                }
+                results.push(result);
+                pending -= 1;
+                if !stop_spawning {
+                    if let Some(group) = iter.next() {
+                        spawn_task(
+                            &mut join_set,
+                            Arc::clone(&execute),
+                            throttle.clone(),
+                            throttle_base_ms,
+                            group,
+                        );
+                        pending += 1;
+                    }
+                }
+            }
+            Some(Err(err)) => {
+                return Err(AppError::FetchRuntime {
+                    reason: format!("failed to join worker task: {err}"),
+                });
+            }
+            None => break,
+        }
+    }
+
+    Ok(results)
 }
 
-fn worker_loop(
-    queue: Arc<std::sync::Mutex<std::vec::IntoIter<Vec<PathBuf>>>>,
-    script_gate: Option<Arc<std::sync::Mutex<ScriptThrottleState>>>,
-    execute: &impl Fn(&[PathBuf]) -> Result<(), String>,
-    results: Arc<std::sync::Mutex<Vec<FetchTaskResult>>>,
-    runtime_error: Arc<std::sync::Mutex<Option<String>>>,
-    stop_flag: Arc<AtomicBool>,
+fn spawn_task<F, Fut>(
+    join_set: &mut JoinSet<FetchTaskResult>,
+    execute: Arc<F>,
+    throttle: Option<Arc<ScriptThrottle>>,
     throttle_base_ms: u64,
-) {
-    loop {
-        if stop_flag.load(Ordering::Relaxed) {
-            return;
-        }
-
-        let next_file = {
-            let mut queue = match queue.lock() {
-                Ok(guard) => guard,
+    group: Vec<PathBuf>,
+) where
+    F: Fn(&[PathBuf]) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = Result<(), String>> + Send + 'static,
+{
+    join_set.spawn(async move {
+        let result = if let Some(throttle) = throttle {
+            let permit = match Arc::clone(&throttle.gate).acquire_owned().await {
+                Ok(permit) => permit,
                 Err(_) => {
-                    store_runtime_error(
-                        &runtime_error,
-                        "task queue lock poisoned".to_string(),
-                        &stop_flag,
-                    );
-                    return;
+                    return (group, Err("script throttle gate closed".to_string()));
                 }
             };
-            queue.next()
-        };
-
-        let Some(group) = next_file else {
-            return;
-        };
-
-        let result = if let Some(gate) = &script_gate {
-            let mut state = match gate.lock() {
-                Ok(guard) => guard,
-                Err(_) => {
-                    store_runtime_error(
-                        &runtime_error,
-                        "script throttle lock poisoned".to_string(),
-                        &stop_flag,
-                    );
-                    return;
-                }
-            };
-            if state.has_previous_task {
-                throttle_script_execution(throttle_base_ms);
+            if throttle.has_previous.load(Ordering::Relaxed) {
+                throttle_script_execution(throttle_base_ms).await;
             }
-            let result = execute(&group);
-            state.has_previous_task = true;
+            let result = execute(&group).await;
+            throttle.has_previous.store(true, Ordering::Relaxed);
+            drop(permit);
             result
         } else {
-            execute(&group)
+            execute(&group).await
         };
-
-        let has_error = result.is_err();
-        if push_task_result(&results, (group, result)).is_err() {
-            store_runtime_error(
-                &runtime_error,
-                "failed to write task result".to_string(),
-                &stop_flag,
-            );
-            return;
-        }
-
-        if has_error {
-            stop_flag.store(true, Ordering::Relaxed);
-            return;
-        }
-    }
+        (group, result)
+    });
 }
 
-fn push_task_result(
-    results: &Arc<std::sync::Mutex<Vec<FetchTaskResult>>>,
-    item: FetchTaskResult,
-) -> Result<(), ()> {
-    let mut guard = results.lock().map_err(|_| ())?;
-    guard.push(item);
-    Ok(())
+#[derive(Debug)]
+struct ScriptThrottle {
+    gate: Arc<Semaphore>,
+    has_previous: AtomicBool,
 }
 
-fn store_runtime_error(
-    slot: &Arc<std::sync::Mutex<Option<String>>>,
-    reason: String,
-    stop_flag: &Arc<AtomicBool>,
-) {
-    if let Ok(mut guard) = slot.lock() {
-        if guard.is_none() {
-            *guard = Some(reason);
+impl ScriptThrottle {
+    fn new() -> Self {
+        Self {
+            gate: Arc::new(Semaphore::new(1)),
+            has_previous: AtomicBool::new(false),
         }
     }
-    stop_flag.store(true, Ordering::Relaxed);
 }
 
 fn effective_worker_count(configured: u32, task_count: usize) -> usize {
@@ -316,9 +292,9 @@ fn effective_worker_count(configured: u32, task_count: usize) -> usize {
     configured.clamp(1, task_count.max(1))
 }
 
-fn throttle_script_execution(base_ms: u64) {
+async fn throttle_script_execution(base_ms: u64) {
     let delay_ms = random_script_delay_ms(base_ms);
-    thread::sleep(Duration::from_millis(delay_ms));
+    sleep(Duration::from_millis(delay_ms)).await;
 }
 
 fn random_script_delay_ms(base_ms: u64) -> u64 {
@@ -347,22 +323,12 @@ fn random_script_delay_ms(base_ms: u64) -> u64 {
     }
 }
 
-fn preflight_script_for_multithread(
+async fn preflight_script_for_multithread(
     fetch: &FetchModeParams,
     script_paths: &[PathBuf],
 ) -> Result<(), AppError> {
     if !fetch.multithread_enabled() {
         return Ok(());
-    }
-
-    for script_path in script_paths {
-        if !weevil_lua::script_uses_only_async_http_file(script_path)
-            .map_err(AppError::LuaPlugin)?
-        {
-            return Err(AppError::ScriptSyncHttpNotAllowed {
-                path: script_path.to_path_buf(),
-            });
-        }
     }
 
     info!(
@@ -427,76 +393,96 @@ mod tests {
         }
     }
 
-    #[test]
-    fn parallel_executor_never_exceeds_configured_limit() {
+    #[tokio::test]
+    async fn parallel_executor_never_exceeds_configured_limit() {
         let task_count = 20;
         let groups = (0..task_count)
             .map(|index| vec![PathBuf::from(format!("task-{index}.mkv"))])
             .collect::<Vec<_>>();
         let fetch = FetchModeParams::new(3, false, 0);
 
-        let active = AtomicUsize::new(0);
-        let peak = AtomicUsize::new(0);
-        let execute = |_: &[PathBuf]| -> Result<(), String> {
-            let current = active.fetch_add(1, Ordering::SeqCst) + 1;
+        let active = Arc::new(AtomicUsize::new(0));
+        let peak = Arc::new(AtomicUsize::new(0));
+        let execute = {
+            let active = Arc::clone(&active);
+            let peak = Arc::clone(&peak);
+            move |_: &[PathBuf]| {
+                let active = Arc::clone(&active);
+                let peak = Arc::clone(&peak);
+                async move {
+                    let current = active.fetch_add(1, Ordering::SeqCst) + 1;
 
-            loop {
-                let observed = peak.load(Ordering::SeqCst);
-                if current <= observed {
-                    break;
-                }
-                if peak
-                    .compare_exchange(observed, current, Ordering::SeqCst, Ordering::SeqCst)
-                    .is_ok()
-                {
-                    break;
+                    loop {
+                        let observed = peak.load(Ordering::SeqCst);
+                        if current <= observed {
+                            break;
+                        }
+                        if peak
+                            .compare_exchange(observed, current, Ordering::SeqCst, Ordering::SeqCst)
+                            .is_ok()
+                        {
+                            break;
+                        }
+                    }
+
+                    sleep(Duration::from_millis(30)).await;
+                    active.fetch_sub(1, Ordering::SeqCst);
+                    Ok(())
                 }
             }
-
-            std::thread::sleep(Duration::from_millis(30));
-            active.fetch_sub(1, Ordering::SeqCst);
-            Ok(())
         };
 
-        let results = run_parallel_with_executor(groups, &fetch, &execute).expect("run parallel");
+        let results = run_parallel_with_executor(groups, &fetch, execute)
+            .await
+            .expect("run parallel");
         assert_eq!(results.len(), task_count);
         assert!(results.iter().all(|(_, result)| result.is_ok()));
         assert!(peak.load(Ordering::SeqCst) <= 3);
         assert!(peak.load(Ordering::SeqCst) >= 2);
     }
 
-    #[test]
-    fn throttle_same_script_prevents_parallel_script_execution() {
+    #[tokio::test]
+    async fn throttle_same_script_prevents_parallel_script_execution() {
         let task_count = 16;
         let groups = (0..task_count)
             .map(|index| vec![PathBuf::from(format!("throttle-task-{index}.mkv"))])
             .collect::<Vec<_>>();
         let fetch = FetchModeParams::new(4, true, 0);
 
-        let active = AtomicUsize::new(0);
-        let peak = AtomicUsize::new(0);
-        let execute = |_: &[PathBuf]| -> Result<(), String> {
-            let current = active.fetch_add(1, Ordering::SeqCst) + 1;
+        let active = Arc::new(AtomicUsize::new(0));
+        let peak = Arc::new(AtomicUsize::new(0));
+        let execute = {
+            let active = Arc::clone(&active);
+            let peak = Arc::clone(&peak);
+            move |_: &[PathBuf]| {
+                let active = Arc::clone(&active);
+                let peak = Arc::clone(&peak);
+                async move {
+                    let current = active.fetch_add(1, Ordering::SeqCst) + 1;
 
-            loop {
-                let observed = peak.load(Ordering::SeqCst);
-                if current <= observed {
-                    break;
-                }
-                if peak
-                    .compare_exchange(observed, current, Ordering::SeqCst, Ordering::SeqCst)
-                    .is_ok()
-                {
-                    break;
+                    loop {
+                        let observed = peak.load(Ordering::SeqCst);
+                        if current <= observed {
+                            break;
+                        }
+                        if peak
+                            .compare_exchange(observed, current, Ordering::SeqCst, Ordering::SeqCst)
+                            .is_ok()
+                        {
+                            break;
+                        }
+                    }
+
+                    sleep(Duration::from_millis(20)).await;
+                    active.fetch_sub(1, Ordering::SeqCst);
+                    Ok(())
                 }
             }
-
-            std::thread::sleep(Duration::from_millis(20));
-            active.fetch_sub(1, Ordering::SeqCst);
-            Ok(())
         };
 
-        let results = run_parallel_with_executor(groups, &fetch, &execute).expect("run parallel");
+        let results = run_parallel_with_executor(groups, &fetch, execute)
+            .await
+            .expect("run parallel");
         assert_eq!(results.len(), task_count);
         assert!(results.iter().all(|(_, result)| result.is_ok()));
         assert_eq!(peak.load(Ordering::SeqCst), 1);

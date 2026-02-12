@@ -1,12 +1,13 @@
 use std::collections::{HashMap, HashSet};
-use std::fs;
 use std::fs::File;
 use std::path::{Path, PathBuf};
-use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use fs2::FileExt;
 use notify::{Event, EventKind, RecursiveMode, Watcher};
+use tokio::fs;
+use tokio::sync::mpsc;
+use tokio::time::interval;
 use tracing::info;
 
 use crate::dir_mode;
@@ -41,20 +42,21 @@ impl PendingFile {
     }
 }
 
-pub(crate) fn run_watch_mode(
+pub(crate) async fn run_watch_mode(
     input: &Path,
     params: &FileModeParams,
     fetch: &FetchModeParams,
     max_depth: i32,
 ) -> Result<(), AppError> {
-    fetch_runtime::preflight_script(fetch, params.scripts())?;
+    fetch_runtime::preflight_script(fetch, params.scripts()).await?;
 
-    let mut seen = dir_mode::scan_video_files(input, max_depth)?
+    let mut seen = dir_mode::scan_video_files(input, max_depth)
+        .await?
         .into_iter()
         .collect::<HashSet<_>>();
     let mut pending: HashMap<PathBuf, PendingFile> = HashMap::new();
 
-    let (sender, receiver) = mpsc::channel();
+    let (sender, mut receiver) = mpsc::unbounded_channel();
     let mut watcher = notify::recommended_watcher(move |result| {
         let _ = sender.send(result);
     })
@@ -66,42 +68,66 @@ pub(crate) fn run_watch_mode(
 
     info!("watch mode started with notify backend: {:?}", input);
 
+    let mut ticker = interval(CHECK_TICK);
+
     loop {
-        match receiver.recv_timeout(CHECK_TICK) {
-            Ok(Ok(event)) => {
-                handle_event(event, input, max_depth, &mut seen, &mut pending)?;
+        tokio::select! {
+            _ = ticker.tick() => {
+                process_ready_files(&mut seen, &mut pending, params, fetch).await?;
             }
-            Ok(Err(err)) => {
-                info!("watch backend event error: {err}");
-            }
-            Err(mpsc::RecvTimeoutError::Timeout) => {}
-            Err(mpsc::RecvTimeoutError::Disconnected) => {
-                return Err(watch_channel_error(input));
+            message = receiver.recv() => {
+                match message {
+                    Some(Ok(event)) => {
+                        handle_event(event, input, max_depth, &mut seen, &mut pending).await?;
+                    }
+                    Some(Err(err)) => {
+                        info!("watch backend event error: {err}");
+                    }
+                    None => {
+                        return Err(watch_channel_error(input));
+                    }
+                }
             }
         }
 
-        seen.retain(|path| path.exists());
-        pending.retain(|path, _| path.exists());
-
-        process_ready_files(&mut seen, &mut pending, params, fetch)?;
+        retain_existing_paths(&mut seen).await;
+        retain_existing_pending(&mut pending).await;
     }
 }
 
-fn process_ready_files(
+async fn retain_existing_paths(seen: &mut HashSet<PathBuf>) {
+    let paths = seen.iter().cloned().collect::<Vec<_>>();
+    for path in paths {
+        if !path_exists(&path).await {
+            seen.remove(&path);
+        }
+    }
+}
+
+async fn retain_existing_pending(pending: &mut HashMap<PathBuf, PendingFile>) {
+    let paths = pending.keys().cloned().collect::<Vec<_>>();
+    for path in paths {
+        if !path_exists(&path).await {
+            pending.remove(&path);
+        }
+    }
+}
+
+async fn process_ready_files(
     seen: &mut HashSet<PathBuf>,
     pending: &mut HashMap<PathBuf, PendingFile>,
     params: &FileModeParams,
     fetch: &FetchModeParams,
 ) -> Result<(), AppError> {
-    let ready = collect_ready_files(seen, pending);
+    let ready = collect_ready_files(seen, pending).await;
     if ready.is_empty() {
         return Ok(());
     }
 
-    let ready_groups = group_ready_files(&ready)?;
+    let ready_groups = group_ready_files(&ready).await?;
 
     let now = Instant::now();
-    let results = fetch_runtime::run_batch_fetch_with_results(ready_groups, params, fetch)?;
+    let results = fetch_runtime::run_batch_fetch_with_results(ready_groups, params, fetch).await?;
     for (group, result) in results {
         match result {
             Ok(()) => {
@@ -124,7 +150,7 @@ fn process_ready_files(
     Ok(())
 }
 
-fn collect_ready_files(
+async fn collect_ready_files(
     seen: &HashSet<PathBuf>,
     pending: &mut HashMap<PathBuf, PendingFile>,
 ) -> Vec<PathBuf> {
@@ -146,7 +172,7 @@ fn collect_ready_files(
             continue;
         }
 
-        let Some(current_len) = file_len(&path) else {
+        let Some(current_len) = file_len(&path).await else {
             pending.remove(&path);
             continue;
         };
@@ -160,7 +186,7 @@ fn collect_ready_files(
             continue;
         }
 
-        let ready = match is_file_ready(&path) {
+        let ready = match is_file_ready(&path).await {
             Ok(value) => value,
             Err(err) => {
                 info!("watch failed to inspect file {:?}: {}", path, err);
@@ -178,7 +204,7 @@ fn collect_ready_files(
     ready_files
 }
 
-fn group_ready_files(paths: &[PathBuf]) -> Result<Vec<Vec<PathBuf>>, AppError> {
+async fn group_ready_files(paths: &[PathBuf]) -> Result<Vec<Vec<PathBuf>>, AppError> {
     let mut groups = Vec::new();
     let mut seen = HashSet::new();
 
@@ -186,7 +212,7 @@ fn group_ready_files(paths: &[PathBuf]) -> Result<Vec<Vec<PathBuf>>, AppError> {
         if seen.contains(path) {
             continue;
         }
-        let mut group = video_parts::sibling_split_group_paths(path)?;
+        let mut group = video_parts::sibling_split_group_paths(path).await?;
         group.sort();
         for part in &group {
             seen.insert(part.clone());
@@ -197,7 +223,7 @@ fn group_ready_files(paths: &[PathBuf]) -> Result<Vec<Vec<PathBuf>>, AppError> {
     Ok(groups)
 }
 
-fn handle_event(
+async fn handle_event(
     event: Event,
     root: &Path,
     max_depth: i32,
@@ -213,12 +239,12 @@ fn handle_event(
         if !path.starts_with(root) {
             continue;
         }
-        if !path.exists() {
+        if !path_exists(&path).await {
             seen.remove(&path);
             pending.remove(&path);
             continue;
         }
-        if !path.is_file() {
+        if !path_is_file(&path).await {
             continue;
         }
         if !path_within_max_depth(root, &path, max_depth) {
@@ -228,10 +254,12 @@ fn handle_event(
             continue;
         }
 
-        let metadata = fs::metadata(&path).map_err(|err| AppError::InputMetadata {
-            path: path.clone(),
-            source: err,
-        })?;
+        let metadata = fs::metadata(&path)
+            .await
+            .map_err(|err| AppError::InputMetadata {
+                path: path.clone(),
+                source: err,
+            })?;
         let len = metadata.len();
 
         if let Some(state) = pending.get_mut(&path) {
@@ -273,35 +301,50 @@ fn path_within_max_depth(root: &Path, path: &Path, max_depth: i32) -> bool {
     depth <= limit
 }
 
-fn file_len(path: &Path) -> Option<u64> {
-    match fs::metadata(path) {
+async fn file_len(path: &Path) -> Option<u64> {
+    match fs::metadata(path).await {
         Ok(metadata) => Some(metadata.len()),
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => None,
         Err(_) => None,
     }
 }
 
-fn is_file_ready(path: &Path) -> Result<bool, AppError> {
-    let file = match File::open(path) {
-        Ok(file) => file,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(false),
-        Err(err) => {
-            return Err(AppError::FileLock {
-                path: path.to_path_buf(),
-                source: err,
-            });
+async fn is_file_ready(path: &Path) -> Result<bool, AppError> {
+    let path = path.to_path_buf();
+    let path_for_error = path.clone();
+    tokio::task::spawn_blocking(move || {
+        let file = match File::open(&path) {
+            Ok(file) => file,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+            Err(err) => return Err(err),
+        };
+        match file.try_lock_exclusive() {
+            Ok(()) => {
+                file.unlock()?;
+                Ok(true)
+            }
+            Err(_) => Ok(false),
         }
-    };
-    match file.try_lock_exclusive() {
-        Ok(()) => {
-            file.unlock().map_err(|err| AppError::FileLock {
-                path: path.to_path_buf(),
-                source: err,
-            })?;
-            Ok(true)
-        }
-        Err(_) => Ok(false),
-    }
+    })
+    .await
+    .map_err(|err| AppError::FetchRuntime {
+        reason: format!("failed to inspect file readiness {path_for_error:?}: {err}"),
+    })?
+    .map_err(|err| AppError::FileLock {
+        path: path_for_error,
+        source: err,
+    })
+}
+
+async fn path_exists(path: &Path) -> bool {
+    fs::try_exists(path).await.unwrap_or(false)
+}
+
+async fn path_is_file(path: &Path) -> bool {
+    fs::metadata(path)
+        .await
+        .map(|metadata| metadata.is_file())
+        .unwrap_or(false)
 }
 
 fn watch_init_error(path: &Path, err: notify::Error) -> AppError {

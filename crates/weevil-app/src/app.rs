@@ -20,9 +20,9 @@ use crate::source_priority::SourcePriority;
 use crate::source_runner;
 use crate::watch_mode;
 
-pub(crate) fn run() -> Result<(), AppError> {
+pub(crate) async fn run() -> Result<(), AppError> {
     let cli = Cli::try_parse().map_err(AppError::Cli)?;
-    let config = AppConfig::load(cli.config.as_deref())?;
+    let config = AppConfig::load(cli.config.as_deref()).await?;
     let cli_node_mapping_csv = cli.node_mapping_csv.clone();
     match cli.command {
         Command::Name {
@@ -33,15 +33,17 @@ pub(crate) fn run() -> Result<(), AppError> {
             save_images,
             multi_source_max_sources,
         } => {
-            let resolved = config.resolve_name_with(&NameCliOverrides {
-                scripts,
-                output,
-                multi_source: flag_override(multi_source),
-                save_images: flag_override(save_images),
-                multi_source_max_sources,
-                node_mapping_csv: cli_node_mapping_csv.clone(),
-            })?;
-            let resolved = dedupe_resolved_name_script_aliases(resolved)?;
+            let resolved = config
+                .resolve_name_with(&NameCliOverrides {
+                    scripts,
+                    output,
+                    multi_source: flag_override(multi_source),
+                    save_images: flag_override(save_images),
+                    multi_source_max_sources,
+                    node_mapping_csv: cli_node_mapping_csv.clone(),
+                })
+                .await?;
+            let resolved = dedupe_resolved_name_script_aliases(resolved).await?;
             run_lua_nfo(
                 &name,
                 &resolved.scripts,
@@ -52,6 +54,7 @@ pub(crate) fn run() -> Result<(), AppError> {
                 &resolved.node_mapping_csv,
                 &resolved.output,
             )
+            .await
         }
         Command::File {
             input,
@@ -68,22 +71,24 @@ pub(crate) fn run() -> Result<(), AppError> {
                     reason: "file mode requires at least one --input".to_string(),
                 });
             }
-            let resolved = config.resolve_file_mode_with(&ModeCliOverrides {
-                scripts,
-                output,
-                input_name_rules,
-                folder_multi,
-                fetch_threads: None,
-                throttle_same_script: None,
-                script_throttle_base_ms: None,
-                multi_source: flag_override(multi_source),
-                save_images: flag_override(save_images),
-                multi_source_max_sources,
-                node_mapping_csv: cli_node_mapping_csv.clone(),
-            })?;
-            let resolved = dedupe_resolved_script_aliases(resolved)?;
-            let params = file_mode_params_from_config(resolved)?;
-            file_mode::run_file_mode_inputs(&input, &params)
+            let resolved = config
+                .resolve_file_mode_with(&ModeCliOverrides {
+                    scripts,
+                    output,
+                    input_name_rules,
+                    folder_multi,
+                    fetch_threads: None,
+                    throttle_same_script: None,
+                    script_throttle_base_ms: None,
+                    multi_source: flag_override(multi_source),
+                    save_images: flag_override(save_images),
+                    multi_source_max_sources,
+                    node_mapping_csv: cli_node_mapping_csv.clone(),
+                })
+                .await?;
+            let resolved = dedupe_resolved_script_aliases(resolved).await?;
+            let params = file_mode_params_from_config(resolved).await?;
+            file_mode::run_file_mode_inputs(&input, &params).await
         }
         Command::Dir {
             input,
@@ -99,29 +104,31 @@ pub(crate) fn run() -> Result<(), AppError> {
             save_images,
             multi_source_max_sources,
         } => {
-            let resolved = config.resolve_dir_mode_with(&DirCliOverrides {
-                input,
-                mode: ModeCliOverrides {
-                    scripts,
-                    output,
-                    input_name_rules,
-                    folder_multi,
-                    fetch_threads,
-                    throttle_same_script: flag_override(throttle_same_script),
-                    script_throttle_base_ms,
-                    multi_source: flag_override(multi_source),
-                    save_images: flag_override(save_images),
-                    multi_source_max_sources,
-                    node_mapping_csv: cli_node_mapping_csv.clone(),
-                },
-                max_depth,
-            })?;
+            let resolved = config
+                .resolve_dir_mode_with(&DirCliOverrides {
+                    input,
+                    mode: ModeCliOverrides {
+                        scripts,
+                        output,
+                        input_name_rules,
+                        folder_multi,
+                        fetch_threads,
+                        throttle_same_script: flag_override(throttle_same_script),
+                        script_throttle_base_ms,
+                        multi_source: flag_override(multi_source),
+                        save_images: flag_override(save_images),
+                        multi_source_max_sources,
+                        node_mapping_csv: cli_node_mapping_csv.clone(),
+                    },
+                    max_depth,
+                })
+                .await?;
             let input = resolved.input;
             let max_depth = resolved.max_depth;
-            let mode = dedupe_resolved_script_aliases(resolved.mode)?;
-            let params = file_mode_params_from_config(mode.clone())?;
+            let mode = dedupe_resolved_script_aliases(resolved.mode).await?;
+            let params = file_mode_params_from_config(mode.clone()).await?;
             let fetch = fetch_mode_params_from_config(mode);
-            dir_mode::run_dir_mode(&input, &params, &fetch, max_depth)
+            dir_mode::run_dir_mode(&input, &params, &fetch, max_depth).await
         }
         Command::Watch {
             input,
@@ -137,60 +144,62 @@ pub(crate) fn run() -> Result<(), AppError> {
             save_images,
             multi_source_max_sources,
         } => {
-            let resolved = config.resolve_watch_mode_with(&DirCliOverrides {
-                input,
-                mode: ModeCliOverrides {
-                    scripts,
-                    output,
-                    input_name_rules,
-                    folder_multi,
-                    fetch_threads,
-                    throttle_same_script: flag_override(throttle_same_script),
-                    script_throttle_base_ms,
-                    multi_source: flag_override(multi_source),
-                    save_images: flag_override(save_images),
-                    multi_source_max_sources,
-                    node_mapping_csv: cli_node_mapping_csv.clone(),
-                },
-                max_depth,
-            })?;
+            let resolved = config
+                .resolve_watch_mode_with(&DirCliOverrides {
+                    input,
+                    mode: ModeCliOverrides {
+                        scripts,
+                        output,
+                        input_name_rules,
+                        folder_multi,
+                        fetch_threads,
+                        throttle_same_script: flag_override(throttle_same_script),
+                        script_throttle_base_ms,
+                        multi_source: flag_override(multi_source),
+                        save_images: flag_override(save_images),
+                        multi_source_max_sources,
+                        node_mapping_csv: cli_node_mapping_csv.clone(),
+                    },
+                    max_depth,
+                })
+                .await?;
             let input = resolved.input;
             let max_depth = resolved.max_depth;
-            let mode = dedupe_resolved_script_aliases(resolved.mode)?;
-            let params = file_mode_params_from_config(mode.clone())?;
+            let mode = dedupe_resolved_script_aliases(resolved.mode).await?;
+            let params = file_mode_params_from_config(mode.clone()).await?;
             let fetch = fetch_mode_params_from_config(mode);
-            watch_mode::run_watch_mode(&input, &params, &fetch, max_depth)
+            watch_mode::run_watch_mode(&input, &params, &fetch, max_depth).await
         }
         Command::Scripts { scripts } => {
-            let infos = script_info::list_script_infos(&config, scripts)?;
+            let infos = script_info::list_script_infos(&config, scripts).await?;
             script_info::print_script_infos(&infos);
             Ok(())
         }
     }
 }
 
-fn dedupe_resolved_script_aliases(
+async fn dedupe_resolved_script_aliases(
     mut resolved: ResolvedModeConfig,
 ) -> Result<ResolvedModeConfig, AppError> {
-    resolved.scripts = dedupe_script_aliases_with_warning(resolved.scripts)?;
+    resolved.scripts = dedupe_script_aliases_with_warning(resolved.scripts).await?;
     Ok(resolved)
 }
 
-fn dedupe_resolved_name_script_aliases(
+async fn dedupe_resolved_name_script_aliases(
     mut resolved: ResolvedNameConfig,
 ) -> Result<ResolvedNameConfig, AppError> {
-    resolved.scripts = dedupe_script_aliases_with_warning(resolved.scripts)?;
+    resolved.scripts = dedupe_script_aliases_with_warning(resolved.scripts).await?;
     Ok(resolved)
 }
 
-fn dedupe_script_aliases_with_warning(
+async fn dedupe_script_aliases_with_warning(
     scripts: Vec<std::path::PathBuf>,
 ) -> Result<Vec<std::path::PathBuf>, AppError> {
     let mut deduped = Vec::with_capacity(scripts.len());
     let mut seen_aliases = HashSet::new();
 
     for script in scripts {
-        let alias = weevil_lua::script_alias_file(&script).map_err(AppError::LuaPlugin)?;
+        let alias = script_alias_from_path(&script).await?;
         if seen_aliases.insert(alias.clone()) {
             deduped.push(script);
             continue;
@@ -203,8 +212,10 @@ fn dedupe_script_aliases_with_warning(
     Ok(deduped)
 }
 
-fn file_mode_params_from_config(resolved: ResolvedModeConfig) -> Result<FileModeParams, AppError> {
-    let mapper = source_runner::load_node_value_mapper(&resolved.node_mapping_csv)?;
+async fn file_mode_params_from_config(
+    resolved: ResolvedModeConfig,
+) -> Result<FileModeParams, AppError> {
+    let mapper = source_runner::load_node_value_mapper(&resolved.node_mapping_csv).await?;
 
     Ok(FileModeParams::new(
         resolved.scripts,
@@ -230,7 +241,6 @@ fn fetch_mode_params_from_config(resolved: ResolvedModeConfig) -> FetchModeParam
 #[cfg(test)]
 mod config_mapping_tests {
     use super::*;
-    use std::fs;
     use tempfile::tempdir;
 
     #[test]
@@ -256,27 +266,30 @@ mod config_mapping_tests {
         assert!(fetch.multithread_enabled());
     }
 
-    #[test]
-    fn dedupe_resolved_script_aliases_keeps_earliest_alias() {
+    #[tokio::test]
+    async fn dedupe_resolved_script_aliases_keeps_earliest_alias() {
         let dir = tempdir().expect("temp dir");
         let first = dir.path().join("a.lua");
         let second = dir.path().join("b.lua");
         let third = dir.path().join("c.lua");
 
-        fs::write(
+        tokio::fs::write(
             &first,
             r#"return { alias = "source.a", trusted_urls = {}, run = function() return nil end }"#,
         )
+        .await
         .expect("write first");
-        fs::write(
+        tokio::fs::write(
             &second,
             r#"return { alias = "source.b", trusted_urls = {}, run = function() return nil end }"#,
         )
+        .await
         .expect("write second");
-        fs::write(
+        tokio::fs::write(
             &third,
             r#"return { alias = "source.a", trusted_urls = {}, run = function() return nil end }"#,
         )
+        .await
         .expect("write third");
 
         let resolved = ResolvedModeConfig {
@@ -294,31 +307,36 @@ mod config_mapping_tests {
             node_mapping_csv: Vec::new(),
         };
 
-        let deduped = dedupe_resolved_script_aliases(resolved).expect("dedupe scripts");
+        let deduped = dedupe_resolved_script_aliases(resolved)
+            .await
+            .expect("dedupe scripts");
         assert_eq!(deduped.scripts, vec![first, second]);
     }
 
-    #[test]
-    fn dedupe_resolved_name_script_aliases_keeps_earliest_alias() {
+    #[tokio::test]
+    async fn dedupe_resolved_name_script_aliases_keeps_earliest_alias() {
         let dir = tempdir().expect("temp dir");
         let first = dir.path().join("name-a.lua");
         let second = dir.path().join("name-b.lua");
         let third = dir.path().join("name-c.lua");
 
-        fs::write(
+        tokio::fs::write(
             &first,
             r#"return { alias = "name.a", trusted_urls = {}, run = function() return nil end }"#,
         )
+        .await
         .expect("write first");
-        fs::write(
+        tokio::fs::write(
             &second,
             r#"return { alias = "name.b", trusted_urls = {}, run = function() return nil end }"#,
         )
+        .await
         .expect("write second");
-        fs::write(
+        tokio::fs::write(
             &third,
             r#"return { alias = "name.a", trusted_urls = {}, run = function() return nil end }"#,
         )
+        .await
         .expect("write third");
 
         let resolved = ResolvedNameConfig {
@@ -331,7 +349,9 @@ mod config_mapping_tests {
             node_mapping_csv: Vec::new(),
         };
 
-        let deduped = dedupe_resolved_name_script_aliases(resolved).expect("dedupe scripts");
+        let deduped = dedupe_resolved_name_script_aliases(resolved)
+            .await
+            .expect("dedupe scripts");
         assert_eq!(deduped.scripts, vec![first, second]);
     }
 }
@@ -348,7 +368,7 @@ fn map_folder_multi(strategy: FolderMultiStrategy) -> MultiFolderStrategy {
     }
 }
 
-fn run_lua_nfo(
+async fn run_lua_nfo(
     name: &str,
     scripts: &[std::path::PathBuf],
     multi_source: bool,
@@ -359,7 +379,7 @@ fn run_lua_nfo(
     output: &Path,
 ) -> Result<(), AppError> {
     let task = TaskContext::new("name");
-    let mapper = source_runner::load_node_value_mapper(node_mapping_csv)?;
+    let mapper = source_runner::load_node_value_mapper(node_mapping_csv).await?;
     let xml = if save_images {
         let mut source_output = source_runner::run_name_scripts_output(
             &task.id,
@@ -370,7 +390,8 @@ fn run_lua_nfo(
             source_priority,
             &mapper,
             name,
-        )?;
+        )
+        .await?;
         let output_dir = output.parent().unwrap_or_else(|| Path::new("."));
         let file_base = output
             .file_stem()
@@ -383,7 +404,8 @@ fn run_lua_nfo(
             output_dir,
             file_base,
             &source_output.trusted_urls,
-        )?;
+        )
+        .await?;
         source_runner::serialize_movie(&source_output.movie)?
     } else {
         source_runner::run_name_scripts(
@@ -395,14 +417,26 @@ fn run_lua_nfo(
             source_priority,
             &mapper,
             name,
-        )?
+        )
+        .await?
     };
 
-    std::fs::write(output, xml).map_err(|err| AppError::OutputWrite {
-        path: output.to_path_buf(),
-        source: err,
-    })?;
+    tokio::fs::write(output, xml)
+        .await
+        .map_err(|err| AppError::OutputWrite {
+            path: output.to_path_buf(),
+            source: err,
+        })?;
     Ok(())
+}
+
+async fn script_alias_from_path(path: &Path) -> Result<String, AppError> {
+    let script = tokio::fs::read_to_string(path)
+        .await
+        .map_err(|err| AppError::FetchRuntime {
+            reason: format!("failed to read script {path:?}: {err}"),
+        })?;
+    weevil_lua::script_alias(&script).map_err(AppError::LuaPlugin)
 }
 
 pub(crate) struct TaskContext {

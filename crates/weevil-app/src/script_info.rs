@@ -16,12 +16,12 @@ pub(crate) struct ScriptInfo {
     pub(crate) duplicate_alias_ignored: bool,
 }
 
-pub(crate) fn list_script_infos(
+pub(crate) async fn list_script_infos(
     config: &AppConfig,
     cli_scripts: Vec<PathBuf>,
 ) -> Result<Vec<ScriptInfo>, AppError> {
     let script_paths = if cli_scripts.is_empty() {
-        gather_scripts_from_config(config)?
+        gather_scripts_from_config(config).await?
     } else {
         cli_scripts
     };
@@ -30,7 +30,13 @@ pub(crate) fn list_script_infos(
     let mut infos = Vec::with_capacity(script_paths.len());
 
     for path in script_paths {
-        let spec = weevil_lua::LuaPlugin::check_file(&path).map_err(AppError::LuaPlugin)?;
+        let script =
+            tokio::fs::read_to_string(&path)
+                .await
+                .map_err(|err| AppError::FetchRuntime {
+                    reason: format!("failed to read script {path:?}: {err}"),
+                })?;
+        let spec = weevil_lua::LuaPlugin::check(&script).map_err(AppError::LuaPlugin)?;
         let duplicate_alias_ignored = !seen_aliases.insert(spec.alias().to_string());
 
         infos.push(ScriptInfo {
@@ -49,8 +55,8 @@ pub(crate) fn list_script_infos(
     Ok(infos)
 }
 
-fn gather_scripts_from_config(config: &AppConfig) -> Result<Vec<PathBuf>, AppError> {
-    let deduped = config.list_script_paths_for_info();
+async fn gather_scripts_from_config(config: &AppConfig) -> Result<Vec<PathBuf>, AppError> {
+    let deduped = config.list_script_paths_for_info().await;
 
     if deduped.is_empty() {
         return Err(AppError::ScriptInfoNoScripts);

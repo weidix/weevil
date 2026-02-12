@@ -140,61 +140,69 @@ fn build_http_table(lua: &Lua, http_mode: HttpMode) -> Result<Table, LuaPluginEr
     let http = lua.create_table()?;
     match http_mode {
         HttpMode::Disabled => {
-            http.set(
-                "get",
-                lua.create_function(|_, _: mlua::Variadic<Value>| -> mlua::Result<String> {
-                    Err(mlua::Error::external(LuaPluginError::HttpDisabled))
-                })?,
-            )?;
-            http.set(
-                "post",
-                lua.create_function(|_, _: mlua::Variadic<Value>| -> mlua::Result<String> {
-                    Err(mlua::Error::external(LuaPluginError::HttpDisabled))
-                })?,
-            )?;
             #[cfg(feature = "async")]
-            http.set(
-                "get_async",
-                lua.create_async_function(|_, _: mlua::Variadic<Value>| async move {
-                    Err::<String, _>(mlua::Error::external(LuaPluginError::HttpDisabled))
-                })?,
-            )?;
-            #[cfg(feature = "async")]
-            http.set(
-                "post_async",
-                lua.create_async_function(|_, _: mlua::Variadic<Value>| async move {
-                    Err::<String, _>(mlua::Error::external(LuaPluginError::HttpDisabled))
-                })?,
-            )?;
+            {
+                http.set(
+                    "get",
+                    lua.create_async_function(|_, _: mlua::Variadic<Value>| async move {
+                        Err::<String, _>(mlua::Error::external(LuaPluginError::HttpDisabled))
+                    })?,
+                )?;
+                http.set(
+                    "post",
+                    lua.create_async_function(|_, _: mlua::Variadic<Value>| async move {
+                        Err::<String, _>(mlua::Error::external(LuaPluginError::HttpDisabled))
+                    })?,
+                )?;
+            }
+            #[cfg(not(feature = "async"))]
+            {
+                http.set(
+                    "get",
+                    lua.create_function(|_, _: mlua::Variadic<Value>| -> mlua::Result<String> {
+                        Err(mlua::Error::external(LuaPluginError::HttpDisabled))
+                    })?,
+                )?;
+                http.set(
+                    "post",
+                    lua.create_function(|_, _: mlua::Variadic<Value>| -> mlua::Result<String> {
+                        Err(mlua::Error::external(LuaPluginError::HttpDisabled))
+                    })?,
+                )?;
+            }
         }
         HttpMode::Enabled(client) => {
-            let blocking = client.clone();
-            http.set(
-                "get",
-                lua.create_function(move |_, (url, options): (String, Option<Value>)| {
-                    let options = parse_http_options(options).map_err(mlua::Error::external)?;
-                    blocking
-                        .get_blocking(&url, &options)
-                        .map_err(mlua::Error::external)
-                })?,
-            )?;
-            let blocking = client.clone();
-            http.set(
-                "post",
-                lua.create_function(
-                    move |_, (url, body, options): (String, String, Option<Value>)| {
+            #[cfg(not(feature = "async"))]
+            {
+                let blocking = client.clone();
+                http.set(
+                    "get",
+                    lua.create_function(move |_, (url, options): (String, Option<Value>)| {
                         let options = parse_http_options(options).map_err(mlua::Error::external)?;
                         blocking
-                            .post_blocking(&url, &body, &options)
+                            .get_blocking(&url, &options)
                             .map_err(mlua::Error::external)
-                    },
-                )?,
-            )?;
+                    })?,
+                )?;
+                let blocking = client.clone();
+                http.set(
+                    "post",
+                    lua.create_function(
+                        move |_, (url, body, options): (String, String, Option<Value>)| {
+                            let options =
+                                parse_http_options(options).map_err(mlua::Error::external)?;
+                            blocking
+                                .post_blocking(&url, &body, &options)
+                                .map_err(mlua::Error::external)
+                        },
+                    )?,
+                )?;
+            }
             #[cfg(feature = "async")]
             {
                 let async_client = client.clone();
                 http.set(
-                    "get_async",
+                    "get",
                     lua.create_async_function(
                         move |_, (url, options): (String, Option<Value>)| {
                             let async_client = async_client.clone();
@@ -211,7 +219,7 @@ fn build_http_table(lua: &Lua, http_mode: HttpMode) -> Result<Table, LuaPluginEr
                 )?;
                 let async_client = client.clone();
                 http.set(
-                    "post_async",
+                    "post",
                     lua.create_async_function(
                         move |_, (url, body, options): (String, String, Option<Value>)| {
                             let async_client = async_client.clone();

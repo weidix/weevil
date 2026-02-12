@@ -3,7 +3,7 @@ use std::fmt;
 use std::sync::{Arc, Mutex, Once, OnceLock};
 
 use tracing_subscriber::prelude::*;
-use weevil_lua::{LuaPlugin, check_script, script_alias, script_uses_only_async_http};
+use weevil_lua::{LuaPlugin, check_script, script_alias};
 
 struct FieldLayer {
     records: Arc<Mutex<Vec<HashMap<String, String>>>>,
@@ -187,8 +187,8 @@ return {
     );
 }
 
-#[test]
-fn http_blocks_untrusted_urls() {
+#[tokio::test]
+async fn http_blocks_untrusted_urls() {
     let script = r#"
 return {
   alias = "test.alias",
@@ -199,12 +199,12 @@ return {
 }
 "#;
     let plugin = LuaPlugin::from_str(&script).expect("load plugin");
-    let err = plugin.call(()).expect_err("should fail");
+    let err = plugin.call_async(()).await.expect_err("should fail");
     assert!(err.to_string().contains("trusted list"));
 }
 
-#[test]
-fn http_post_blocks_untrusted_urls() {
+#[tokio::test]
+async fn http_post_blocks_untrusted_urls() {
     let script = r#"
 return {
   alias = "test.alias",
@@ -215,12 +215,12 @@ return {
 }
 "#;
     let plugin = LuaPlugin::from_str(&script).expect("load plugin");
-    let err = plugin.call(()).expect_err("should fail");
+    let err = plugin.call_async(()).await.expect_err("should fail");
     assert!(err.to_string().contains("trusted list"));
 }
 
-#[test]
-fn http_rejects_non_string_header_name() {
+#[tokio::test]
+async fn http_rejects_non_string_header_name() {
     let script = r#"
 return {
   alias = "test.alias",
@@ -231,15 +231,15 @@ return {
 }
 "#;
     let plugin = LuaPlugin::from_str(&script).expect("load plugin");
-    let err = plugin.call(()).expect_err("should fail");
+    let err = plugin.call_async(()).await.expect_err("should fail");
     assert!(
         err.to_string()
             .contains("HTTP header name must be a string")
     );
 }
 
-#[test]
-fn http_post_rejects_non_string_header_name() {
+#[tokio::test]
+async fn http_post_rejects_non_string_header_name() {
     let script = r#"
 return {
   alias = "test.alias",
@@ -250,15 +250,15 @@ return {
 }
 "#;
     let plugin = LuaPlugin::from_str(&script).expect("load plugin");
-    let err = plugin.call(()).expect_err("should fail");
+    let err = plugin.call_async(()).await.expect_err("should fail");
     assert!(
         err.to_string()
             .contains("HTTP header name must be a string")
     );
 }
 
-#[test]
-fn http_rejects_non_string_header_value() {
+#[tokio::test]
+async fn http_rejects_non_string_header_value() {
     let script = r#"
 return {
   alias = "test.alias",
@@ -269,15 +269,15 @@ return {
 }
 "#;
     let plugin = LuaPlugin::from_str(&script).expect("load plugin");
-    let err = plugin.call(()).expect_err("should fail");
+    let err = plugin.call_async(()).await.expect_err("should fail");
     assert!(
         err.to_string()
             .contains("HTTP header user-agent must be a string value")
     );
 }
 
-#[test]
-fn http_rejects_non_string_version() {
+#[tokio::test]
+async fn http_rejects_non_string_version() {
     let script = r#"
 return {
   alias = "test.alias",
@@ -288,12 +288,12 @@ return {
 }
 "#;
     let plugin = LuaPlugin::from_str(&script).expect("load plugin");
-    let err = plugin.call(()).expect_err("should fail");
+    let err = plugin.call_async(()).await.expect_err("should fail");
     assert!(err.to_string().contains("HTTP version must be a string"));
 }
 
-#[test]
-fn http_post_rejects_non_string_version() {
+#[tokio::test]
+async fn http_post_rejects_non_string_version() {
     let script = r#"
 return {
   alias = "test.alias",
@@ -304,12 +304,12 @@ return {
 }
 "#;
     let plugin = LuaPlugin::from_str(&script).expect("load plugin");
-    let err = plugin.call(()).expect_err("should fail");
+    let err = plugin.call_async(()).await.expect_err("should fail");
     assert!(err.to_string().contains("HTTP version must be a string"));
 }
 
-#[test]
-fn http_rejects_unsupported_version() {
+#[tokio::test]
+async fn http_rejects_unsupported_version() {
     let script = r#"
 return {
   alias = "test.alias",
@@ -320,7 +320,7 @@ return {
 }
 "#;
     let plugin = LuaPlugin::from_str(&script).expect("load plugin");
-    let err = plugin.call(()).expect_err("should fail");
+    let err = plugin.call_async(()).await.expect_err("should fail");
     assert!(err.to_string().contains("HTTP version 3 is not supported"));
 }
 
@@ -439,49 +439,4 @@ return {
     let plugin = LuaPlugin::from_str(script).expect("load plugin");
     let err = plugin.call(()).expect_err("should fail");
     assert!(err.to_string().contains("unsupported Lua value function"));
-}
-
-#[test]
-fn async_http_preflight_accepts_async_calls() {
-    let script = r#"
-return {
-  alias = "test.alias",
-  trusted_urls = { "https://example.com/" },
-  run = function()
-    return weevil.http.get_async("https://example.com/")
-  end
-}
-"#;
-    let ok = script_uses_only_async_http(script).expect("check script");
-    assert!(ok);
-}
-
-#[test]
-fn async_http_preflight_rejects_blocking_get() {
-    let script = r#"
-return {
-  alias = "test.alias",
-  trusted_urls = { "https://example.com/" },
-  run = function()
-    return weevil.http.get("https://example.com/")
-  end
-}
-"#;
-    let ok = script_uses_only_async_http(script).expect("check script");
-    assert!(!ok);
-}
-
-#[test]
-fn async_http_preflight_rejects_blocking_post() {
-    let script = r#"
-return {
-  alias = "test.alias",
-  trusted_urls = { "https://example.com/" },
-  run = function()
-    return weevil.http.post("https://example.com/", "{}")
-  end
-}
-"#;
-    let ok = script_uses_only_async_http(script).expect("check script");
-    assert!(!ok);
 }

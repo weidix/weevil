@@ -1,6 +1,7 @@
 use std::ffi::OsString;
-use std::fs;
 use std::path::{Path, PathBuf};
+
+use tokio::fs;
 
 pub(super) fn dedupe_paths(paths: Vec<PathBuf>) -> Vec<PathBuf> {
     let mut deduped = Vec::new();
@@ -12,7 +13,7 @@ pub(super) fn dedupe_paths(paths: Vec<PathBuf>) -> Vec<PathBuf> {
     deduped
 }
 
-pub(super) fn expand_script_patterns(paths: Vec<PathBuf>) -> Vec<PathBuf> {
+pub(super) async fn expand_script_patterns(paths: Vec<PathBuf>) -> Vec<PathBuf> {
     let mut expanded = Vec::new();
 
     for path in paths {
@@ -21,7 +22,7 @@ pub(super) fn expand_script_patterns(paths: Vec<PathBuf>) -> Vec<PathBuf> {
             continue;
         }
 
-        let mut matched = expand_glob_pattern(&path);
+        let mut matched = expand_glob_pattern(&path).await;
         if matched.is_empty() {
             expanded.push(path);
             continue;
@@ -40,14 +41,14 @@ enum GlobSegment {
     Literal(OsString),
 }
 
-fn expand_glob_pattern(pattern: &Path) -> Vec<PathBuf> {
+async fn expand_glob_pattern(pattern: &Path) -> Vec<PathBuf> {
     let (base, segments) = split_pattern(pattern);
     if segments.is_empty() {
         return vec![pattern.to_path_buf()];
     }
 
     let mut matches = Vec::new();
-    expand_segments(&base, &segments, &mut matches);
+    expand_segments(&base, &segments, &mut matches).await;
     matches.sort();
     dedupe_paths(matches)
 }
@@ -81,9 +82,9 @@ fn split_pattern(pattern: &Path) -> (PathBuf, Vec<GlobSegment>) {
     (base, segments)
 }
 
-fn expand_segments(current: &Path, segments: &[GlobSegment], matches: &mut Vec<PathBuf>) {
+async fn expand_segments(current: &Path, segments: &[GlobSegment], matches: &mut Vec<PathBuf>) {
     if segments.is_empty() {
-        if current.is_file() {
+        if is_file(current).await {
             matches.push(normalize_match_path(current));
         }
         return;
@@ -92,56 +93,72 @@ fn expand_segments(current: &Path, segments: &[GlobSegment], matches: &mut Vec<P
     match &segments[0] {
         GlobSegment::Literal(component) => {
             let next = current.join(component);
-            if next.exists() {
-                expand_segments(&next, &segments[1..], matches);
+            if path_exists(&next).await {
+                Box::pin(expand_segments(&next, &segments[1..], matches)).await;
             }
         }
         GlobSegment::Pattern(pattern) => {
-            for entry in list_entries(current) {
+            for entry in list_entries(current).await {
                 let Some(file_name) = entry.file_name() else {
                     continue;
                 };
                 let entry_name = file_name.to_string_lossy();
                 if wildcard_component_matches(pattern, &entry_name) {
-                    expand_segments(&entry, &segments[1..], matches);
+                    Box::pin(expand_segments(&entry, &segments[1..], matches)).await;
                 }
             }
         }
         GlobSegment::Recursive => {
-            expand_segments(current, &segments[1..], matches);
+            Box::pin(expand_segments(current, &segments[1..], matches)).await;
 
-            for entry in list_entries(current) {
-                if is_directory(&entry) {
-                    expand_segments(&entry, segments, matches);
+            for entry in list_entries(current).await {
+                if is_directory(&entry).await {
+                    Box::pin(expand_segments(&entry, segments, matches)).await;
                 }
             }
         }
     }
 }
 
-fn list_entries(path: &Path) -> Vec<PathBuf> {
+async fn list_entries(path: &Path) -> Vec<PathBuf> {
     let base = if path.as_os_str().is_empty() {
         Path::new(".")
     } else {
         path
     };
 
-    let Ok(read_dir) = fs::read_dir(base) else {
+    let Ok(mut read_dir) = fs::read_dir(base).await else {
         return Vec::new();
     };
 
     let mut entries = Vec::new();
-    for entry in read_dir.flatten() {
-        entries.push(entry.path());
+    loop {
+        match read_dir.next_entry().await {
+            Ok(Some(entry)) => entries.push(entry.path()),
+            Ok(None) => break,
+            Err(_) => break,
+        }
     }
     entries.sort();
     entries
 }
 
-fn is_directory(path: &Path) -> bool {
+async fn is_directory(path: &Path) -> bool {
     fs::symlink_metadata(path)
+        .await
         .map(|metadata| metadata.file_type().is_dir())
         .unwrap_or(false)
+}
+
+async fn is_file(path: &Path) -> bool {
+    fs::metadata(path)
+        .await
+        .map(|metadata| metadata.is_file())
+        .unwrap_or(false)
+}
+
+async fn path_exists(path: &Path) -> bool {
+    fs::try_exists(path).await.unwrap_or(false)
 }
 
 fn normalize_match_path(path: &Path) -> PathBuf {
@@ -200,10 +217,10 @@ mod tests {
         assert!(!wildcard_component_matches("*.lua", "demo.txt"));
     }
 
-    #[test]
-    fn expand_script_patterns_keeps_literal_when_glob_unmatched() {
+    #[tokio::test]
+    async fn expand_script_patterns_keeps_literal_when_glob_unmatched() {
         let literal = PathBuf::from("scripts/missing/*.lua");
-        let expanded = expand_script_patterns(vec![literal.clone()]);
+        let expanded = expand_script_patterns(vec![literal.clone()]).await;
         assert_eq!(expanded, vec![literal]);
     }
 }

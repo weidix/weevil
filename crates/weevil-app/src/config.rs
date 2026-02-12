@@ -1,7 +1,7 @@
-use std::fs;
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
+use tokio::fs;
 
 use crate::cli::FolderMultiStrategy;
 use crate::errors::AppError;
@@ -148,24 +148,26 @@ struct DirConfig {
 }
 
 impl AppConfig {
-    pub(crate) fn load(path: Option<&Path>) -> Result<Self, AppError> {
-        let Some(path) = resolve_path(path) else {
+    pub(crate) async fn load(path: Option<&Path>) -> Result<Self, AppError> {
+        let Some(path) = resolve_path(path).await else {
             return Ok(Self::default());
         };
 
-        let content = fs::read_to_string(&path).map_err(|source| AppError::ConfigRead {
-            path: path.clone(),
-            source,
-        })?;
+        let content = fs::read_to_string(&path)
+            .await
+            .map_err(|source| AppError::ConfigRead {
+                path: path.clone(),
+                source,
+            })?;
 
         toml::from_str(&content).map_err(|source| AppError::ConfigParse { path, source })
     }
 
-    pub(crate) fn resolve_name_with(
+    pub(crate) async fn resolve_name_with(
         &self,
         cli: &NameCliOverrides,
     ) -> Result<ResolvedNameConfig, AppError> {
-        let scripts = self.resolve_name_scripts(cli);
+        let scripts = self.resolve_name_scripts(cli).await;
         if scripts.is_empty() {
             return Err(AppError::ConfigMissingField {
                 mode: "name",
@@ -220,18 +222,18 @@ impl AppConfig {
         })
     }
 
-    pub(crate) fn resolve_file_mode_with(
+    pub(crate) async fn resolve_file_mode_with(
         &self,
         cli: &ModeCliOverrides,
     ) -> Result<ResolvedModeConfig, AppError> {
-        resolve_mode_config("file", &self.file, &self.shared, cli)
+        resolve_mode_config("file", &self.file, &self.shared, cli).await
     }
 
-    pub(crate) fn resolve_dir_mode_with(
+    pub(crate) async fn resolve_dir_mode_with(
         &self,
         cli: &DirCliOverrides,
     ) -> Result<ResolvedDirConfig, AppError> {
-        let mode = resolve_mode_config("dir", &self.dir.mode, &self.shared, &cli.mode)?;
+        let mode = resolve_mode_config("dir", &self.dir.mode, &self.shared, &cli.mode).await?;
         let input = cli.input.clone().or_else(|| self.dir.input.clone()).ok_or(
             AppError::ConfigMissingField {
                 mode: "dir",
@@ -245,11 +247,11 @@ impl AppConfig {
         })
     }
 
-    pub(crate) fn resolve_watch_mode_with(
+    pub(crate) async fn resolve_watch_mode_with(
         &self,
         cli: &DirCliOverrides,
     ) -> Result<ResolvedDirConfig, AppError> {
-        let mode = resolve_mode_config("watch", &self.watch.mode, &self.shared, &cli.mode)?;
+        let mode = resolve_mode_config("watch", &self.watch.mode, &self.shared, &cli.mode).await?;
         let input = cli
             .input
             .clone()
@@ -272,66 +274,59 @@ impl AppConfig {
             .or_else(|| self.shared.output.clone().map(PathBuf::from))
     }
 
-    fn resolve_name_scripts(&self, cli: &NameCliOverrides) -> Vec<PathBuf> {
+    async fn resolve_name_scripts(&self, cli: &NameCliOverrides) -> Vec<PathBuf> {
         let cli_scripts = dedupe_paths(cli.scripts.clone());
         if !cli_scripts.is_empty() {
             return cli_scripts;
         }
 
-        if let Some(scripts) = self
-            .name
-            .scripts
-            .as_ref()
-            .map(StringPathList::to_vec)
-            .map(expand_script_patterns)
-            .filter(|scripts| !scripts.is_empty())
-        {
-            return scripts;
+        if let Some(list) = self.name.scripts.as_ref().map(StringPathList::to_vec) {
+            let scripts = expand_script_patterns(list).await;
+            if !scripts.is_empty() {
+                return scripts;
+            }
         }
 
         if let Some(script) = self.name.script.clone() {
-            return expand_script_patterns(vec![script]);
+            return expand_script_patterns(vec![script]).await;
         }
 
-        if let Some(scripts) = self
-            .shared
-            .scripts
-            .as_ref()
-            .map(StringPathList::to_vec)
-            .map(expand_script_patterns)
-            .filter(|scripts| !scripts.is_empty())
-        {
-            return scripts;
+        if let Some(list) = self.shared.scripts.as_ref().map(StringPathList::to_vec) {
+            let scripts = expand_script_patterns(list).await;
+            if !scripts.is_empty() {
+                return scripts;
+            }
         }
 
-        expand_script_patterns(self.shared.script.clone().into_iter().collect())
+        expand_script_patterns(self.shared.script.clone().into_iter().collect()).await
     }
 }
 
-fn resolve_path(path: Option<&Path>) -> Option<PathBuf> {
+async fn resolve_path(path: Option<&Path>) -> Option<PathBuf> {
     if let Some(path) = path {
         return Some(path.to_path_buf());
     }
 
     let default_path = PathBuf::from(DEFAULT_CONFIG_PATH);
-    if default_path.exists() {
+    if fs::try_exists(&default_path).await.ok()? {
         return Some(default_path);
     }
 
     None
 }
 
-fn resolve_mode_config(
+async fn resolve_mode_config(
     mode: &'static str,
     mode_config: &ModeConfig,
     shared: &SharedConfig,
     cli: &ModeCliOverrides,
 ) -> Result<ResolvedModeConfig, AppError> {
-    let scripts =
-        resolve_mode_scripts(mode_config, shared, cli).ok_or(AppError::ConfigMissingField {
+    let scripts = resolve_mode_scripts(mode_config, shared, cli).await.ok_or(
+        AppError::ConfigMissingField {
             mode,
             field: "script",
-        })?;
+        },
+    )?;
 
     let output = cli
         .output
@@ -423,7 +418,7 @@ fn resolve_mode_config(
     })
 }
 
-fn resolve_mode_scripts(
+async fn resolve_mode_scripts(
     mode_config: &ModeConfig,
     shared: &SharedConfig,
     cli: &ModeCliOverrides,
@@ -433,34 +428,28 @@ fn resolve_mode_scripts(
         return Some(cli_scripts);
     }
 
-    if let Some(scripts) = mode_config
-        .scripts
-        .as_ref()
-        .map(StringPathList::to_vec)
-        .map(expand_script_patterns)
-        .filter(|scripts| !scripts.is_empty())
-    {
-        return Some(scripts);
+    if let Some(list) = mode_config.scripts.as_ref().map(StringPathList::to_vec) {
+        let scripts = expand_script_patterns(list).await;
+        if !scripts.is_empty() {
+            return Some(scripts);
+        }
     }
 
     if let Some(script) = mode_config.script.clone() {
-        return Some(expand_script_patterns(vec![script]));
+        return Some(expand_script_patterns(vec![script]).await);
     }
 
-    if let Some(scripts) = shared
-        .scripts
-        .as_ref()
-        .map(StringPathList::to_vec)
-        .map(expand_script_patterns)
-        .filter(|scripts| !scripts.is_empty())
-    {
-        return Some(scripts);
+    if let Some(list) = shared.scripts.as_ref().map(StringPathList::to_vec) {
+        let scripts = expand_script_patterns(list).await;
+        if !scripts.is_empty() {
+            return Some(scripts);
+        }
     }
 
-    shared
-        .script
-        .clone()
-        .map(|script| expand_script_patterns(vec![script]))
+    match shared.script.clone() {
+        Some(script) => Some(expand_script_patterns(vec![script]).await),
+        None => None,
+    }
 }
 
 fn resolve_node_mapping_csv(
