@@ -7,13 +7,17 @@ license.workspace = true
 [features]
 default = ["async", "json"]
 async = ["mlua/async", "mlua/send"]
+browser = ["dep:chromiumoxide", "dep:futures-util", "dep:tokio", "async"]
 json = ["dep:serde_json"]
 
 [dependencies]
+chromiumoxide = { version = "0.8", default-features = false, features = ["tokio-runtime"], optional = true }
+futures-util = { version = "0.3", optional = true }
 mlua = { version = "0.11", features = ["lua55", "vendored"] }
 reqwest = { version = "0.13", default-features = false, features = ["blocking", "http2", "rustls"] }
 serde_json = { version = "1", optional = true }
 thiserror = "2"
+tokio = { version = "1", features = ["rt", "time"], optional = true }
 tracing = "0.1"
 url = "2"
 weevil-core = { path = "../weevil-core" }

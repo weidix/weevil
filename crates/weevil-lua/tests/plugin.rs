@@ -187,6 +187,26 @@ return {
     );
 }
 
+#[cfg(not(feature = "browser"))]
+#[tokio::test]
+async fn browser_launch_requires_browser_feature() {
+    let script = r#"
+return {
+  alias = "test.alias",
+  trusted_urls = {},
+  run = function()
+    return weevil.browser.launch({ headless = true })
+  end
+}
+"#;
+    let plugin = LuaPlugin::from_str(script).expect("load plugin");
+    let err = plugin.call_async(()).await.expect_err("should fail");
+    assert!(
+        err.to_string()
+            .contains("browser automation feature is not enabled")
+    );
+}
+
 #[tokio::test]
 async fn http_blocks_untrusted_urls() {
     let script = r#"

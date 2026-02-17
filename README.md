@@ -427,6 +427,13 @@ Available in script as global `weevil`:
   - `get(url, options?)`, `post(url, body, options?)`
   - async-enabled builds also provide `get_async`, `post_async`
   - `options.version` supports `1.1`/`2` (and aliases like `http/2`)
+- `weevil.browser` (requires `weevil-lua` feature `browser`)
+  - constructors: `launch(options?)`, `connect(endpoint)`
+  - launch options: `headless` (default `true`), `executable_path`, `no_sandbox`, `args`
+  - session methods: `websocket_address()`, `new_page(url?)`, `close()`
+  - page methods: `goto(url)`, `content()`, `url()`, `title()`, `click(selector)`,
+    `type(selector, text)`, `press(selector, key)`, `set_user_agent(user_agent)`,
+    `reload()`, `wait_for_navigation()`, `close()`
 - `weevil.json`
   - `encode(value)`, `decode(string)`, `null`
 - `weevil.log`
@@ -478,5 +485,6 @@ Unsupported constructs return `QueryExecError` with feature category and hint.
 ## Known Boundaries / Non-goals
 
 - No built-in website adapters in the Rust binary.
-- No browser automation/captcha solving pipeline in current release.
+- No built-in captcha solver pipeline in current release.
+- Browser automation is script-driven and available when `weevil-lua` enables `browser`.
 - Lua scripts own anti-bot strategy, request pacing, and field reconciliation.

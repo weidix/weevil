@@ -1,10 +1,14 @@
 //! Lua runtime bindings for weevil.
 
+#[cfg(feature = "browser")]
+mod browser;
 mod error;
 mod http;
 mod lua;
 mod plugin;
 
+#[cfg(feature = "browser")]
+pub use crate::browser::{BrowserLaunchOptions, BrowserPage, BrowserSession};
 pub use crate::error::LuaPluginError;
 pub use crate::http::{HttpClient, HttpRequestOptions, TrustedUrl};
 pub use crate::lua::{HttpMode, install_module};

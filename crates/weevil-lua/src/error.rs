@@ -72,6 +72,28 @@ pub enum LuaPluginError {
     HttpStatus { url: String, status: u16 },
     #[error("HTTP is disabled in script check mode")]
     HttpDisabled,
+    #[error("browser automation is disabled in script check mode")]
+    BrowserDisabled,
+    #[error("browser automation feature is not enabled")]
+    BrowserFeatureDisabled,
+    #[error("browser options must be a table, got {kind}")]
+    BrowserOptionsNotTable { kind: String },
+    #[error("browser option {name} must be a boolean, got {kind}")]
+    BrowserOptionNotBoolean { name: String, kind: String },
+    #[error("browser option {name} must be a string, got {kind}")]
+    BrowserOptionNotString { name: String, kind: String },
+    #[error("browser option {name} is not valid UTF-8")]
+    BrowserOptionNotUtf8 { name: String },
+    #[error("browser option args must be an array of strings, got {kind}")]
+    BrowserOptionArgsNotArray { kind: String },
+    #[error("browser option args entry {index} must be a string, got {kind}")]
+    BrowserOptionArgNotString { index: usize, kind: String },
+    #[error("browser option args entry {index} is not valid UTF-8")]
+    BrowserOptionArgNotUtf8 { index: usize },
+    #[error("browser endpoint must be ws/wss/http/https URL, got {value}")]
+    BrowserEndpointInvalid { value: String },
+    #[error("browser operation failed while {context}: {message}")]
+    BrowserOperation { context: String, message: String },
     #[error("script table is missing run function")]
     MissingRunFunction,
     #[error("failed to read script file {path:?}: {source}")]

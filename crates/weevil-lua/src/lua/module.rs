@@ -6,6 +6,7 @@ use weevil_core::{HtmlTree, Selector, XPath};
 
 use crate::error::LuaPluginError;
 use crate::http::{HttpClient, HttpRequestOptions};
+use crate::lua::browser::{BrowserMode, build_browser_table};
 #[cfg(feature = "json")]
 use crate::lua::json::build_json_table;
 use crate::lua::types::{LuaHtmlTree, LuaSelector, LuaXPath};
@@ -32,6 +33,7 @@ pub fn install_module(lua: &Lua, http_mode: HttpMode) -> Result<(), LuaPluginErr
     weevil.set("selector", build_selector_table(lua)?)?;
     weevil.set("xpath", build_xpath_table(lua)?)?;
     weevil.set("http", build_http_table(lua, http_mode)?)?;
+    weevil.set("browser", build_browser_table(lua, BrowserMode::Disabled)?)?;
     weevil.set("log", build_log_table(lua)?)?;
     #[cfg(feature = "json")]
     weevil.set("json", build_json_table(lua)?)?;
@@ -44,6 +46,14 @@ pub fn set_http(lua: &Lua, http_mode: HttpMode) -> Result<(), LuaPluginError> {
     let weevil: Table = globals.get("weevil")?;
     let http = build_http_table(lua, http_mode)?;
     weevil.set("http", http)?;
+    Ok(())
+}
+
+pub fn set_browser(lua: &Lua, browser_mode: BrowserMode) -> Result<(), LuaPluginError> {
+    let globals = lua.globals();
+    let weevil: Table = globals.get("weevil")?;
+    let browser = build_browser_table(lua, browser_mode)?;
+    weevil.set("browser", browser)?;
     Ok(())
 }
 

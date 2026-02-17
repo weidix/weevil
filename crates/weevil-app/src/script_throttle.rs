@@ -156,6 +156,14 @@ mod tests {
     use super::*;
     use std::sync::atomic::AtomicUsize;
     use tokio::sync::Barrier;
+    use tokio::time::timeout;
+
+    static TEST_KEY_COUNTER: AtomicUsize = AtomicUsize::new(0);
+
+    fn unique_test_key(prefix: &str) -> String {
+        let index = TEST_KEY_COUNTER.fetch_add(1, Ordering::SeqCst);
+        format!("{prefix}-{index}")
+    }
 
     #[test]
     fn random_delay_stays_in_expected_range() {
@@ -196,15 +204,17 @@ mod tests {
         let active = Arc::new(AtomicUsize::new(0));
         let peak = Arc::new(AtomicUsize::new(0));
         let config = ScriptThrottleConfig::enabled(0);
+        let key = unique_test_key("throttle-serializes-same-script");
         let mut join_set = tokio::task::JoinSet::new();
 
         for index in 0..task_count {
             let barrier = Arc::clone(&barrier);
             let active = Arc::clone(&active);
             let peak = Arc::clone(&peak);
+            let key = key.clone();
             join_set.spawn(async move {
                 barrier.wait().await;
-                run_with_throttle("script-a", config, || async move {
+                run_with_throttle(&key, config, || async move {
                     let current = active.fetch_add(1, Ordering::SeqCst) + 1;
                     loop {
                         let observed = peak.load(Ordering::SeqCst);
@@ -238,18 +248,22 @@ mod tests {
     #[tokio::test]
     async fn throttle_allows_different_scripts() {
         let barrier = Arc::new(Barrier::new(3));
+        let overlap = Arc::new(Barrier::new(2));
         let active = Arc::new(AtomicUsize::new(0));
         let peak = Arc::new(AtomicUsize::new(0));
         let config = ScriptThrottleConfig::enabled(0);
         let mut join_set = tokio::task::JoinSet::new();
+        let key_a = unique_test_key("throttle-allows-different-a");
+        let key_b = unique_test_key("throttle-allows-different-b");
 
-        for key in ["script-a", "script-b"] {
+        for key in [key_a, key_b] {
             let barrier = Arc::clone(&barrier);
+            let overlap = Arc::clone(&overlap);
             let active = Arc::clone(&active);
             let peak = Arc::clone(&peak);
             join_set.spawn(async move {
                 barrier.wait().await;
-                run_with_throttle(key, config, || async move {
+                run_with_throttle(&key, config, || async move {
                     let current = active.fetch_add(1, Ordering::SeqCst) + 1;
                     loop {
                         let observed = peak.load(Ordering::SeqCst);
@@ -262,6 +276,16 @@ mod tests {
                         {
                             break;
                         }
+                    }
+
+                    if timeout(Duration::from_secs(1), overlap.wait())
+                        .await
+                        .is_err()
+                    {
+                        active.fetch_sub(1, Ordering::SeqCst);
+                        return Err(AppError::FetchRuntime {
+                            reason: "different-script throttle test did not overlap".to_string(),
+                        });
                     }
 
                     sleep(Duration::from_millis(40)).await;

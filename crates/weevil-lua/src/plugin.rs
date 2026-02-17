@@ -7,7 +7,9 @@ use mlua::{IntoLuaMulti, Lua, RegistryKey, Value};
 
 use crate::error::LuaPluginError;
 use crate::http::{HttpClient, TrustedUrl};
-use crate::lua::{HttpMode, LogContext, install_module, set_http, set_log_context};
+use crate::lua::{
+    BrowserMode, HttpMode, LogContext, install_module, set_browser, set_http, set_log_context,
+};
 
 #[derive(Debug, Clone)]
 pub struct LuaPluginSpec {
@@ -48,6 +50,11 @@ impl LuaPlugin {
         let run_key = lua.create_registry_value(run)?;
         let http = Arc::new(HttpClient::new(trusted_urls.clone())?);
         set_http(&lua, HttpMode::Enabled(http))?;
+        #[cfg(feature = "browser")]
+        let browser_mode = BrowserMode::Enabled;
+        #[cfg(not(feature = "browser"))]
+        let browser_mode = BrowserMode::Unsupported;
+        set_browser(&lua, browser_mode)?;
         Ok(Self {
             alias,
             lua,
