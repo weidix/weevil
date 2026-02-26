@@ -1,4 +1,6 @@
 mod browser;
+#[cfg(feature = "browser")]
+mod browser_codec;
 #[cfg(feature = "json")]
 mod json;
 mod module;

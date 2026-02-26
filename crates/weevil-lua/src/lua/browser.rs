@@ -5,6 +5,8 @@ use mlua::{UserData, UserDataMethods};
 #[cfg(feature = "browser")]
 use crate::browser::{BrowserLaunchOptions, BrowserPage, BrowserSession};
 use crate::error::LuaPluginError;
+#[cfg(feature = "browser")]
+use crate::lua::browser_codec::{cookies_to_lua, json_to_lua, parse_cookie_inputs};
 
 #[derive(Clone, Copy)]
 pub enum BrowserMode {
@@ -187,6 +189,25 @@ impl UserData for LuaBrowserSession {
                 .map_err(mlua::Error::external)?;
             Ok(LuaBrowserPage(page))
         });
+        methods.add_async_method("get_cookies", |lua, this, ()| async move {
+            let cookies = this.0.get_cookies().await.map_err(mlua::Error::external)?;
+            cookies_to_lua(&lua, cookies)
+        });
+        methods.add_async_method("set_cookies", |_, this, value: Value| async move {
+            let cookies = parse_cookie_inputs(value).map_err(mlua::Error::external)?;
+            this.0
+                .set_cookies(cookies)
+                .await
+                .map_err(mlua::Error::external)?;
+            Ok(())
+        });
+        methods.add_async_method("clear_cookies", |_, this, ()| async move {
+            this.0
+                .clear_cookies()
+                .await
+                .map_err(mlua::Error::external)?;
+            Ok(())
+        });
         methods.add_async_method("close", |_, this, ()| async move {
             this.0.close().await.map_err(mlua::Error::external)?;
             Ok(())
@@ -212,6 +233,26 @@ impl UserData for LuaBrowserPage {
         });
         methods.add_async_method("title", |_, this, ()| async move {
             this.0.title().await.map_err(mlua::Error::external)
+        });
+        methods.add_async_method("evaluate", |lua, this, expression: String| async move {
+            let value = this
+                .0
+                .evaluate(&expression)
+                .await
+                .map_err(mlua::Error::external)?;
+            json_to_lua(&lua, value)
+        });
+        methods.add_async_method("get_cookies", |lua, this, ()| async move {
+            let cookies = this.0.get_cookies().await.map_err(mlua::Error::external)?;
+            cookies_to_lua(&lua, cookies)
+        });
+        methods.add_async_method("set_cookies", |_, this, value: Value| async move {
+            let cookies = parse_cookie_inputs(value).map_err(mlua::Error::external)?;
+            this.0
+                .set_cookies(cookies)
+                .await
+                .map_err(mlua::Error::external)?;
+            Ok(())
         });
         methods.add_async_method("click", |_, this, selector: String| async move {
             this.0
@@ -389,99 +430,5 @@ fn value_kind(value: &Value) -> &'static str {
 }
 
 #[cfg(all(test, feature = "browser"))]
-mod tests {
-    use super::parse_launch_options;
-    use mlua::{Lua, Value};
-
-    #[test]
-    fn parse_launch_options_defaults() {
-        let parsed = parse_launch_options(None).expect("default options");
-        assert!(parsed.headless);
-        assert_eq!(parsed.executable_path, None);
-        assert!(!parsed.no_sandbox);
-        assert!(parsed.args.is_empty());
-    }
-
-    #[test]
-    fn parse_launch_options_from_table() {
-        let lua = Lua::new();
-        let table = lua.create_table().expect("table");
-        table.set("headless", false).expect("headless");
-        table
-            .set("executable_path", "/opt/browser/chrome")
-            .expect("path");
-        table.set("no_sandbox", true).expect("no_sandbox");
-        let args = lua
-            .create_sequence_from(["--disable-gpu", "--window-size=1200,800"])
-            .expect("args");
-        table.set("args", args).expect("set args");
-
-        let parsed = parse_launch_options(Some(Value::Table(table))).expect("parsed");
-        assert!(!parsed.headless);
-        assert_eq!(
-            parsed.executable_path.as_deref(),
-            Some("/opt/browser/chrome")
-        );
-        assert!(parsed.no_sandbox);
-        assert_eq!(
-            parsed.args,
-            vec![
-                "--disable-gpu".to_string(),
-                "--window-size=1200,800".to_string()
-            ]
-        );
-    }
-
-    #[test]
-    fn parse_launch_options_rejects_non_table() {
-        let err = parse_launch_options(Some(Value::Boolean(true)))
-            .err()
-            .expect("non-table should fail");
-        assert!(err.to_string().contains("browser options must be a table"));
-    }
-
-    #[test]
-    fn parse_launch_options_rejects_invalid_field_types() {
-        let lua = Lua::new();
-        let table = lua.create_table().expect("table");
-        table.set("headless", "yes").expect("headless");
-        let err = parse_launch_options(Some(Value::Table(table)))
-            .err()
-            .expect("invalid field should fail");
-        assert!(
-            err.to_string()
-                .contains("browser option headless must be a boolean")
-        );
-    }
-
-    #[test]
-    fn parse_launch_options_rejects_non_array_args() {
-        let lua = Lua::new();
-        let table = lua.create_table().expect("table");
-        let args = lua.create_table().expect("args");
-        args.set("first", "--disable-gpu").expect("set arg");
-        table.set("args", args).expect("set args");
-        let err = parse_launch_options(Some(Value::Table(table)))
-            .err()
-            .expect("non-array args should fail");
-        assert!(
-            err.to_string()
-                .contains("browser option args must be an array")
-        );
-    }
-
-    #[test]
-    fn parse_launch_options_rejects_non_string_arg_entry() {
-        let lua = Lua::new();
-        let table = lua.create_table().expect("table");
-        let args = lua.create_sequence_from([1]).expect("args");
-        table.set("args", args).expect("set args");
-        let err = parse_launch_options(Some(Value::Table(table)))
-            .err()
-            .expect("non-string args should fail");
-        assert!(
-            err.to_string()
-                .contains("browser option args entry 1 must be a string")
-        );
-    }
-}
+#[path = "browser_tests.rs"]
+mod tests;

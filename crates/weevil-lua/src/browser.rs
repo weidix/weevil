@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use chromiumoxide::Page;
 use chromiumoxide::browser::{Browser, BrowserConfig};
+use chromiumoxide::cdp::browser_protocol::network::{Cookie, CookieParam, TimeSinceEpoch};
 use chromiumoxide::handler::Handler;
 use futures_util::StreamExt;
 use tokio::sync::Mutex;
@@ -27,6 +28,30 @@ impl Default for BrowserLaunchOptions {
             args: Vec::new(),
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct BrowserCookie {
+    pub name: String,
+    pub value: String,
+    pub domain: String,
+    pub path: String,
+    pub expires: f64,
+    pub secure: bool,
+    pub http_only: bool,
+    pub session: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct BrowserCookieInput {
+    pub name: String,
+    pub value: String,
+    pub url: Option<String>,
+    pub domain: Option<String>,
+    pub path: Option<String>,
+    pub secure: Option<bool>,
+    pub http_only: Option<bool>,
+    pub expires: Option<f64>,
 }
 
 #[derive(Clone)]
@@ -69,6 +94,37 @@ impl BrowserSession {
     pub async fn websocket_address(&self) -> String {
         let browser = self.browser.lock().await;
         browser.websocket_address().clone()
+    }
+
+    pub async fn get_cookies(&self) -> Result<Vec<BrowserCookie>, LuaPluginError> {
+        let browser = self.browser.lock().await;
+        let cookies = browser
+            .get_cookies()
+            .await
+            .map_err(|err| browser_operation_error("getting browser cookies", err))?;
+        Ok(cookies.into_iter().map(BrowserCookie::from).collect())
+    }
+
+    pub async fn set_cookies(
+        &self,
+        cookies: Vec<BrowserCookieInput>,
+    ) -> Result<(), LuaPluginError> {
+        let browser = self.browser.lock().await;
+        let cookie_params = cookies.into_iter().map(cookie_input_to_param).collect();
+        browser
+            .set_cookies(cookie_params)
+            .await
+            .map_err(|err| browser_operation_error("setting browser cookies", err))?;
+        Ok(())
+    }
+
+    pub async fn clear_cookies(&self) -> Result<(), LuaPluginError> {
+        let browser = self.browser.lock().await;
+        browser
+            .clear_cookies()
+            .await
+            .map_err(|err| browser_operation_error("clearing browser cookies", err))?;
+        Ok(())
     }
 
     pub async fn close(&self) -> Result<(), LuaPluginError> {
@@ -141,6 +197,39 @@ impl BrowserPage {
             .map_err(|err| browser_operation_error("decoding page title", err))
     }
 
+    pub async fn evaluate(&self, expression: &str) -> Result<serde_json::Value, LuaPluginError> {
+        let value = self
+            .page
+            .evaluate(expression)
+            .await
+            .map_err(|err| browser_operation_error("evaluating expression", err))?
+            .value()
+            .cloned()
+            .unwrap_or(serde_json::Value::Null);
+        Ok(value)
+    }
+
+    pub async fn get_cookies(&self) -> Result<Vec<BrowserCookie>, LuaPluginError> {
+        let cookies = self
+            .page
+            .get_cookies()
+            .await
+            .map_err(|err| browser_operation_error("getting page cookies", err))?;
+        Ok(cookies.into_iter().map(BrowserCookie::from).collect())
+    }
+
+    pub async fn set_cookies(
+        &self,
+        cookies: Vec<BrowserCookieInput>,
+    ) -> Result<(), LuaPluginError> {
+        let cookie_params = cookies.into_iter().map(cookie_input_to_param).collect();
+        self.page
+            .set_cookies(cookie_params)
+            .await
+            .map_err(|err| browser_operation_error("setting page cookies", err))?;
+        Ok(())
+    }
+
     pub async fn click(&self, selector: &str) -> Result<(), LuaPluginError> {
         self.page
             .find_element(selector)
@@ -207,6 +296,32 @@ impl BrowserPage {
             .close()
             .await
             .map_err(|err| browser_operation_error("closing page", err))
+    }
+}
+
+fn cookie_input_to_param(cookie: BrowserCookieInput) -> CookieParam {
+    let mut param = CookieParam::new(cookie.name, cookie.value);
+    param.url = cookie.url;
+    param.domain = cookie.domain;
+    param.path = cookie.path;
+    param.secure = cookie.secure;
+    param.http_only = cookie.http_only;
+    param.expires = cookie.expires.map(TimeSinceEpoch::new);
+    param
+}
+
+impl From<Cookie> for BrowserCookie {
+    fn from(cookie: Cookie) -> Self {
+        Self {
+            name: cookie.name,
+            value: cookie.value,
+            domain: cookie.domain,
+            path: cookie.path,
+            expires: cookie.expires,
+            secure: cookie.secure,
+            http_only: cookie.http_only,
+            session: cookie.session,
+        }
     }
 }
 

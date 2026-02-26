@@ -90,6 +90,32 @@ pub enum LuaPluginError {
     BrowserOptionArgNotString { index: usize, kind: String },
     #[error("browser option args entry {index} is not valid UTF-8")]
     BrowserOptionArgNotUtf8 { index: usize },
+    #[error("browser cookies must be an array, got {kind}")]
+    BrowserCookiesNotArray { kind: String },
+    #[error("browser cookie entry {index} must be a table, got {kind}")]
+    BrowserCookieNotTable { index: usize, kind: String },
+    #[error("browser cookie entry {index} is missing field {field}")]
+    BrowserCookieMissingField { index: usize, field: String },
+    #[error("browser cookie entry {index} field {field} must be a string, got {kind}")]
+    BrowserCookieFieldNotString {
+        index: usize,
+        field: String,
+        kind: String,
+    },
+    #[error("browser cookie entry {index} field {field} is not valid UTF-8")]
+    BrowserCookieFieldNotUtf8 { index: usize, field: String },
+    #[error("browser cookie entry {index} field {field} must be a boolean, got {kind}")]
+    BrowserCookieFieldNotBoolean {
+        index: usize,
+        field: String,
+        kind: String,
+    },
+    #[error("browser cookie entry {index} field {field} must be a number, got {kind}")]
+    BrowserCookieFieldNotNumber {
+        index: usize,
+        field: String,
+        kind: String,
+    },
     #[error("browser endpoint must be ws/wss/http/https URL, got {value}")]
     BrowserEndpointInvalid { value: String },
     #[error("browser operation failed while {context}: {message}")]

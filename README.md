@@ -430,10 +430,12 @@ Available in script as global `weevil`:
 - `weevil.browser` (requires `weevil-lua` feature `browser`)
   - constructors: `launch(options?)`, `connect(endpoint)`
   - launch options: `headless` (default `true`), `executable_path`, `no_sandbox`, `args`
-  - session methods: `websocket_address()`, `new_page(url?)`, `close()`
-  - page methods: `goto(url)`, `content()`, `url()`, `title()`, `click(selector)`,
-    `type(selector, text)`, `press(selector, key)`, `set_user_agent(user_agent)`,
-    `reload()`, `wait_for_navigation()`, `close()`
+  - session methods: `websocket_address()`, `new_page(url?)`, `get_cookies()`,
+    `set_cookies(cookies)`, `clear_cookies()`, `close()`
+  - page methods: `goto(url)`, `content()`, `url()`, `title()`, `evaluate(js_expr)`,
+    `get_cookies()`, `set_cookies(cookies)`, `click(selector)`, `type(selector, text)`,
+    `press(selector, key)`, `set_user_agent(user_agent)`, `reload()`,
+    `wait_for_navigation()`, `close()`
 - `weevil.json`
   - `encode(value)`, `decode(string)`, `null`
 - `weevil.log`
