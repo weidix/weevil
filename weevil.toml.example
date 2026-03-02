@@ -33,14 +33,15 @@ details = ["source_primary"]
 target-lang = "en"
 keys = ["title", "originaltitle", "plot"]
 
-[[shared.translation.endpoints]]
+# Configure one endpoint.
+[shared.translation.endpoints]
 kind = "openai"
 url = "https://example.invalid/v1/chat/completions"
 api-key = "REPLACE_WITH_KEY"
 model = "gpt-translation"
 
-# Free Google Translate endpoint (no api-key/url required):
-# [[shared.translation.endpoints]]
+# To switch endpoint type, replace the block above with:
+# [shared.translation.endpoints]
 # kind = "google-free"
 
 [name]

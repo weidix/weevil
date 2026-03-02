@@ -7,14 +7,14 @@ use crate::nfo::{Actor, Movie};
 
 use super::config::{ResolvedTranslationConfig, TranslationKey};
 use super::detector::LanguageDetector;
-use super::endpoints::{TranslationEndpoint, build_endpoints};
+use super::endpoints::{TranslationEndpoint, build_endpoint};
 
 #[derive(Clone)]
 pub(crate) struct MovieTranslator {
     enabled: bool,
     target_lang: String,
     keys: Vec<TranslationKey>,
-    endpoints: Vec<TranslationEndpoint>,
+    endpoint: Option<TranslationEndpoint>,
     client: Client,
     detector: LanguageDetector,
 }
@@ -25,7 +25,7 @@ impl fmt::Debug for MovieTranslator {
             .field("enabled", &self.enabled)
             .field("target_lang", &self.target_lang)
             .field("keys", &self.keys)
-            .field("endpoint_count", &self.endpoints.len())
+            .field("has_endpoint", &self.endpoint.is_some())
             .finish()
     }
 }
@@ -40,13 +40,16 @@ impl MovieTranslator {
             reason: "translation target-lang is required when translation is enabled".to_string(),
         })?;
         let detector = LanguageDetector::new(target_lang)?;
-        let endpoints = build_endpoints(config.endpoints())?;
+        let endpoint_config = config.endpoint().ok_or_else(|| AppError::FetchRuntime {
+            reason: "translation endpoints are required when translation is enabled".to_string(),
+        })?;
+        let endpoint = build_endpoint(endpoint_config)?;
 
         Ok(Self {
             enabled: true,
             target_lang: target_lang.to_string(),
             keys: config.keys().to_vec(),
-            endpoints,
+            endpoint: Some(endpoint),
             client: Client::new(),
             detector,
         })
@@ -57,7 +60,7 @@ impl MovieTranslator {
             enabled: false,
             target_lang: String::new(),
             keys: Vec::new(),
-            endpoints: Vec::new(),
+            endpoint: None,
             client: Client::new(),
             detector: LanguageDetector::unknown(),
         }
@@ -291,29 +294,18 @@ impl MovieTranslator {
         if texts.is_empty() {
             return Ok(Vec::new());
         }
-        if self.endpoints.is_empty() {
+        let Some(endpoint) = self.endpoint.as_ref() else {
             return Err(AppError::FetchRuntime {
                 reason: "translation endpoints are not configured".to_string(),
             });
-        }
+        };
 
-        let mut errors = Vec::new();
-        for endpoint in &self.endpoints {
-            match endpoint
-                .translate(&self.client, &self.target_lang, texts)
-                .await
-            {
-                Ok(translated) => return Ok(translated),
-                Err(reason) => errors.push(reason),
-            }
-        }
-
-        Err(AppError::FetchRuntime {
-            reason: format!(
-                "translation failed for all endpoints: {errors}",
-                errors = errors.join("; ")
-            ),
-        })
+        endpoint
+            .translate(&self.client, &self.target_lang, texts)
+            .await
+            .map_err(|reason| AppError::FetchRuntime {
+                reason: format!("translation failed: {reason}"),
+            })
     }
 }
 
@@ -329,7 +321,7 @@ impl MovieTranslator {
     pub(super) fn new_for_tests(
         target_lang: &str,
         keys: Vec<TranslationKey>,
-        endpoints: Vec<TranslationEndpoint>,
+        endpoint: TranslationEndpoint,
     ) -> Self {
         let detector =
             LanguageDetector::new(target_lang).unwrap_or_else(|_| LanguageDetector::unknown());
@@ -337,7 +329,7 @@ impl MovieTranslator {
             enabled: true,
             target_lang: target_lang.to_string(),
             keys,
-            endpoints,
+            endpoint: Some(endpoint),
             client: Client::new(),
             detector,
         }

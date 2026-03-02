@@ -9,14 +9,14 @@ use crate::errors::AppError;
 pub(crate) struct TranslationConfig {
     pub(crate) target_lang: Option<String>,
     pub(crate) keys: Option<TranslationKeyList>,
-    pub(crate) endpoints: Option<TranslationEndpointList>,
+    pub(crate) endpoints: Option<TranslationEndpointConfig>,
 }
 
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ResolvedTranslationConfig {
     target_lang: Option<String>,
     keys: Vec<TranslationKey>,
-    endpoints: Vec<TranslationEndpointConfig>,
+    endpoint: Option<TranslationEndpointConfig>,
 }
 
 impl ResolvedTranslationConfig {
@@ -32,8 +32,8 @@ impl ResolvedTranslationConfig {
         &self.keys
     }
 
-    pub(crate) fn endpoints(&self) -> &[TranslationEndpointConfig] {
-        &self.endpoints
+    pub(crate) fn endpoint(&self) -> Option<&TranslationEndpointConfig> {
+        self.endpoint.as_ref()
     }
 }
 
@@ -61,12 +61,12 @@ pub(crate) fn resolve_translation_config(
         Vec::new()
     };
 
-    let endpoints = if let Some(list) = mode.and_then(|config| config.endpoints.as_ref()) {
-        list.to_vec()
-    } else if let Some(list) = shared.and_then(|config| config.endpoints.as_ref()) {
-        list.to_vec()
+    let endpoint = if let Some(value) = mode.and_then(|config| config.endpoints.as_ref()) {
+        Some(value.clone())
+    } else if let Some(value) = shared.and_then(|config| config.endpoints.as_ref()) {
+        Some(value.clone())
     } else {
-        Vec::new()
+        None
     };
 
     let (keys, unknown_keys) = parse_translation_keys(keys);
@@ -87,7 +87,7 @@ pub(crate) fn resolve_translation_config(
         });
     }
 
-    if endpoints.is_empty() {
+    if endpoint.is_none() {
         return Err(AppError::FetchRuntime {
             reason: "translation endpoints are required when translation keys are configured"
                 .to_string(),
@@ -97,7 +97,7 @@ pub(crate) fn resolve_translation_config(
     Ok(ResolvedTranslationConfig {
         target_lang,
         keys,
-        endpoints,
+        endpoint,
     })
 }
 
@@ -196,22 +196,6 @@ impl TranslationKeyList {
         match self {
             TranslationKeyList::One(value) => vec![value.clone()],
             TranslationKeyList::Many(values) => values.clone(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(untagged)]
-pub(crate) enum TranslationEndpointList {
-    One(TranslationEndpointConfig),
-    Many(Vec<TranslationEndpointConfig>),
-}
-
-impl TranslationEndpointList {
-    pub(crate) fn to_vec(&self) -> Vec<TranslationEndpointConfig> {
-        match self {
-            TranslationEndpointList::One(value) => vec![value.clone()],
-            TranslationEndpointList::Many(values) => values.clone(),
         }
     }
 }

@@ -42,44 +42,40 @@ impl TranslationEndpoint {
     }
 }
 
-pub(super) fn build_endpoints(
-    configs: &[TranslationEndpointConfig],
-) -> Result<Vec<TranslationEndpoint>, AppError> {
-    let mut endpoints = Vec::new();
-    for config in configs {
-        let endpoint = match config {
-            TranslationEndpointConfig::OpenAI {
-                url,
-                api_key,
-                model,
-            } => TranslationEndpoint::OpenAI(OpenAIEndpoint {
-                url: url.clone(),
+pub(super) fn build_endpoint(
+    config: &TranslationEndpointConfig,
+) -> Result<TranslationEndpoint, AppError> {
+    let endpoint = match config {
+        TranslationEndpointConfig::OpenAI {
+            url,
+            api_key,
+            model,
+        } => TranslationEndpoint::OpenAI(OpenAIEndpoint {
+            url: url.clone(),
+            api_key: api_key.clone(),
+            model: model.clone(),
+        }),
+        TranslationEndpointConfig::GoogleFree => {
+            TranslationEndpoint::GoogleFree(GoogleFreeEndpoint)
+        }
+        TranslationEndpointConfig::Google { api_key, url } => {
+            TranslationEndpoint::Google(GoogleEndpoint {
                 api_key: api_key.clone(),
-                model: model.clone(),
-            }),
-            TranslationEndpointConfig::GoogleFree => {
-                TranslationEndpoint::GoogleFree(GoogleFreeEndpoint)
-            }
-            TranslationEndpointConfig::Google { api_key, url } => {
-                TranslationEndpoint::Google(GoogleEndpoint {
-                    api_key: api_key.clone(),
-                    url: url.clone().unwrap_or_else(|| {
-                        "https://translation.googleapis.com/language/translate/v2".to_string()
-                    }),
-                })
-            }
-            TranslationEndpointConfig::DeepL { auth_key, url } => {
-                TranslationEndpoint::DeepL(DeepLEndpoint {
-                    auth_key: auth_key.clone(),
-                    url: url
-                        .clone()
-                        .unwrap_or_else(|| "https://api-free.deepl.com/v2/translate".to_string()),
-                })
-            }
-        };
-        endpoints.push(endpoint);
-    }
-    Ok(endpoints)
+                url: url.clone().unwrap_or_else(|| {
+                    "https://translation.googleapis.com/language/translate/v2".to_string()
+                }),
+            })
+        }
+        TranslationEndpointConfig::DeepL { auth_key, url } => {
+            TranslationEndpoint::DeepL(DeepLEndpoint {
+                auth_key: auth_key.clone(),
+                url: url
+                    .clone()
+                    .unwrap_or_else(|| "https://api-free.deepl.com/v2/translate".to_string()),
+            })
+        }
+    };
+    Ok(endpoint)
 }
 
 #[derive(Clone)]

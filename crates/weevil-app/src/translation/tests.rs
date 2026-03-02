@@ -9,7 +9,7 @@ fn resolve_translation_config_requires_target_lang() {
         r#"
 keys = ["title"]
 
-[[endpoints]]
+[endpoints]
 kind = "openai"
 url = "https://example.invalid/v1/chat/completions"
 api-key = "test-key"
@@ -28,7 +28,7 @@ fn resolve_translation_config_empty_keys_disables_translation() {
 target-lang = "en"
 keys = []
 
-[[endpoints]]
+[endpoints]
 kind = "openai"
 url = "https://example.invalid/v1/chat/completions"
 api-key = "test-key"
@@ -48,7 +48,7 @@ fn resolve_translation_config_rejects_unknown_keys() {
 target-lang = "en"
 keys = ["unknown"]
 
-[[endpoints]]
+[endpoints]
 kind = "openai"
 url = "https://example.invalid/v1/chat/completions"
 api-key = "test-key"
@@ -67,7 +67,7 @@ fn resolve_translation_config_accepts_google_free_endpoint() {
 target-lang = "zh-CN"
 keys = ["title"]
 
-[[endpoints]]
+[endpoints]
 kind = "google-free"
 "#,
     )
@@ -77,13 +77,33 @@ kind = "google-free"
     assert_eq!(resolved.keys(), &[TranslationKey::Title]);
 }
 
+#[test]
+fn parse_translation_config_rejects_endpoint_array() {
+    let parse_result = toml::from_str::<TranslationConfig>(
+        r#"
+target-lang = "en"
+keys = ["title"]
+
+[[endpoints]]
+kind = "google-free"
+
+[[endpoints]]
+kind = "openai"
+url = "https://example.invalid/v1/chat/completions"
+api-key = "test-key"
+model = "gpt-test"
+"#,
+    );
+    assert!(parse_result.is_err());
+}
+
 #[tokio::test]
 async fn translate_movie_skips_target_language_values() {
     let (endpoint, calls) = endpoints::StubEndpoint::new("T:");
     let translator = MovieTranslator::new_for_tests(
         "en",
         vec![TranslationKey::Title, TranslationKey::Plot],
-        vec![endpoint],
+        endpoint,
     );
 
     let mut movie = Movie {
