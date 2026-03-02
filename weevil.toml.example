@@ -28,6 +28,21 @@ node-mapping-csv = ["./node_mapping_base.csv", "./node_mapping_extra.csv"] # opt
 images = ["source_primary", "source_secondary"]
 details = ["source_primary"]
 
+[shared.translation]
+# Optional translation configuration. If keys is empty, translation is disabled.
+target-lang = "en"
+keys = ["title", "originaltitle", "plot"]
+
+[[shared.translation.endpoints]]
+kind = "openai"
+url = "https://example.invalid/v1/chat/completions"
+api-key = "REPLACE_WITH_KEY"
+model = "gpt-translation"
+
+# Free Google Translate endpoint (no api-key/url required):
+# [[shared.translation.endpoints]]
+# kind = "google-free"
+
 [name]
 # name mode output file path (NFO)
 output = "./output/name-mode.nfo"

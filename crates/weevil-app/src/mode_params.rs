@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use crate::source_priority::SourcePriority;
 use crate::source_runner::NodeValueMapper;
+use crate::translation::MovieTranslator;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum MultiFolderStrategy {
@@ -21,6 +22,7 @@ pub(crate) struct FileModeParams {
     multi_source_max_sources: u32,
     source_priority: SourcePriority,
     node_value_mapper: NodeValueMapper,
+    movie_translator: MovieTranslator,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -71,6 +73,7 @@ impl FileModeParams {
         multi_source_max_sources: u32,
         source_priority: SourcePriority,
         node_value_mapper: NodeValueMapper,
+        movie_translator: MovieTranslator,
     ) -> Self {
         Self {
             scripts,
@@ -82,6 +85,7 @@ impl FileModeParams {
             multi_source_max_sources,
             source_priority,
             node_value_mapper,
+            movie_translator,
         }
     }
 
@@ -120,6 +124,10 @@ impl FileModeParams {
     pub(crate) fn node_value_mapper(&self) -> &NodeValueMapper {
         &self.node_value_mapper
     }
+
+    pub(crate) fn movie_translator(&self) -> &MovieTranslator {
+        &self.movie_translator
+    }
 }
 
 #[cfg(test)]
@@ -138,6 +146,7 @@ mod tests {
             2,
             SourcePriority::default(),
             NodeValueMapper::from_csv("genre,剧情,Drama\n").expect("mapper"),
+            MovieTranslator::disabled(),
         );
 
         assert!(params.node_value_mapper().has_rules());

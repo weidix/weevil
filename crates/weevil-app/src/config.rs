@@ -6,7 +6,11 @@ use tokio::fs;
 use crate::cli::FolderMultiStrategy;
 use crate::errors::AppError;
 use crate::source_priority::{SourcePriority, SourcePriorityConfig};
+use crate::translation::{
+    ResolvedTranslationConfig, TranslationConfig, resolve_translation_config,
+};
 
+use self::resolve_helpers::{resolve_max_depth, resolve_node_mapping_csv};
 use self::script_paths::{dedupe_paths, expand_script_patterns};
 use self::value_types::{StringList, StringPathList};
 
@@ -63,6 +67,7 @@ pub(crate) struct ResolvedNameConfig {
     pub(crate) multi_source_max_sources: u32,
     pub(crate) source_priority: SourcePriority,
     pub(crate) node_mapping_csv: Vec<PathBuf>,
+    pub(crate) translation: ResolvedTranslationConfig,
 }
 
 #[derive(Debug, Clone)]
@@ -79,6 +84,7 @@ pub(crate) struct ResolvedModeConfig {
     pub(crate) multi_source_max_sources: u32,
     pub(crate) source_priority: SourcePriority,
     pub(crate) node_mapping_csv: Vec<PathBuf>,
+    pub(crate) translation: ResolvedTranslationConfig,
 }
 
 #[derive(Debug, Clone)]
@@ -105,6 +111,7 @@ struct SharedConfig {
     multi_source_max_sources: Option<u32>,
     source_priority: Option<SourcePriorityConfig>,
     node_mapping_csv: Option<StringPathList>,
+    translation: Option<TranslationConfig>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -118,6 +125,7 @@ struct NameConfig {
     multi_source_max_sources: Option<u32>,
     source_priority: Option<SourcePriorityConfig>,
     node_mapping_csv: Option<StringPathList>,
+    translation: Option<TranslationConfig>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -137,6 +145,7 @@ struct ModeConfig {
     multi_source_max_sources: Option<u32>,
     source_priority: Option<SourcePriorityConfig>,
     node_mapping_csv: Option<StringPathList>,
+    translation: Option<TranslationConfig>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -210,6 +219,10 @@ impl AppConfig {
             self.name.node_mapping_csv.as_ref(),
             self.shared.node_mapping_csv.as_ref(),
         );
+        let translation = resolve_translation_config(
+            self.name.translation.as_ref(),
+            self.shared.translation.as_ref(),
+        )?;
 
         Ok(ResolvedNameConfig {
             scripts,
@@ -219,6 +232,7 @@ impl AppConfig {
             multi_source_max_sources,
             source_priority,
             node_mapping_csv,
+            translation,
         })
     }
 
@@ -401,6 +415,10 @@ async fn resolve_mode_config(
         mode_config.node_mapping_csv.as_ref(),
         shared.node_mapping_csv.as_ref(),
     );
+    let translation = resolve_translation_config(
+        mode_config.translation.as_ref(),
+        shared.translation.as_ref(),
+    )?;
 
     Ok(ResolvedModeConfig {
         scripts,
@@ -415,6 +433,7 @@ async fn resolve_mode_config(
         multi_source_max_sources,
         source_priority,
         node_mapping_csv,
+        translation,
     })
 }
 
@@ -452,35 +471,6 @@ async fn resolve_mode_scripts(
     }
 }
 
-fn resolve_node_mapping_csv(
-    cli: &[PathBuf],
-    mode: Option<&StringPathList>,
-    shared: Option<&StringPathList>,
-) -> Vec<PathBuf> {
-    if !cli.is_empty() {
-        return dedupe_paths(cli.to_vec());
-    }
-
-    if let Some(paths) = mode.and_then(non_empty_path_list) {
-        return dedupe_paths(paths);
-    }
-
-    if let Some(paths) = shared.and_then(non_empty_path_list) {
-        return dedupe_paths(paths);
-    }
-
-    Vec::new()
-}
-
-fn non_empty_path_list(list: &StringPathList) -> Option<Vec<PathBuf>> {
-    let paths = list.to_vec();
-    if paths.is_empty() { None } else { Some(paths) }
-}
-
-fn resolve_max_depth(mode: &ModeConfig, shared: &SharedConfig, cli: Option<i32>) -> i32 {
-    cli.or(mode.max_depth).or(shared.max_depth).unwrap_or(-1)
-}
-
 #[cfg(test)]
 #[path = "tests/config_local.rs"]
 mod local_tests;
@@ -491,6 +481,7 @@ mod source_priority_tests;
 #[path = "tests/config.rs"]
 mod tests;
 
+mod resolve_helpers;
 mod script_listing;
 mod script_paths;
 mod value_types;

@@ -149,6 +149,21 @@ node-mapping-csv = "./node_mapping.csv"
 images = ["source.alpha", "source.alpha.mirror"]
 details = ["source.alpha"]
 
+[shared.translation]
+# Optional translation config. If keys is empty, translation is disabled.
+target-lang = "en"
+keys = ["title", "originaltitle", "plot"]
+
+[[shared.translation.endpoints]]
+kind = "openai"
+url = "https://example.invalid/v1/chat/completions"
+api-key = "REPLACE_WITH_KEY"
+model = "gpt-translation"
+
+# Free Google Translate endpoint (no api-key/url required):
+# [[shared.translation.endpoints]]
+# kind = "google-free"
+
 [name]
 output = "./sample.nfo"
 save-images = false
@@ -203,6 +218,11 @@ cargo run -p weevil-app -- dir --max-depth 1
 - Aggregation merges empty fields from later sources and combines `tag` / `genre` / `actor` / `fanart.thumb` / cross-platform `ratings` without duplicate entries.
 - `--node-mapping-csv` (or `node-mapping-csv` in config) applies CSV value mapping before final output.
 - Mapping supports `many-to-one` rules; final dedupe uses mapped values (especially useful for `genre`, `tag`, and `actor`).
+- Translation can be configured per mode or in `[shared.translation]`:
+  - `target-lang` sets the target language.
+  - `keys` controls which NFO keys are translated (empty list disables translation).
+  - endpoint `kind` supports `openai`, `google-free`, `google`, `deepl`.
+  - Values already detected as the target language are not translated.
 - Optional source-priority config for selected field groups:
   - `[*.source-priority].images = ["alias_a", "alias_b"]`
   - `[*.source-priority].details = ["alias_x", "alias_y"]`

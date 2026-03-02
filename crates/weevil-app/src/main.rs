@@ -13,6 +13,7 @@ mod script_info;
 mod script_throttle;
 mod source_priority;
 mod source_runner;
+mod translation;
 mod video_parts;
 mod watch_mode;
 

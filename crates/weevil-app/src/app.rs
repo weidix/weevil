@@ -19,6 +19,7 @@ use crate::script_info;
 use crate::script_throttle::ScriptThrottleConfig;
 use crate::source_priority::SourcePriority;
 use crate::source_runner;
+use crate::translation::MovieTranslator;
 use crate::watch_mode;
 
 pub(crate) async fn run() -> Result<(), AppError> {
@@ -53,6 +54,7 @@ pub(crate) async fn run() -> Result<(), AppError> {
                 resolved.multi_source_max_sources,
                 &resolved.source_priority,
                 &resolved.node_mapping_csv,
+                &resolved.translation,
                 &resolved.output,
             )
             .await
@@ -217,6 +219,7 @@ async fn file_mode_params_from_config(
     resolved: ResolvedModeConfig,
 ) -> Result<FileModeParams, AppError> {
     let mapper = source_runner::load_node_value_mapper(&resolved.node_mapping_csv).await?;
+    let translator = MovieTranslator::new(&resolved.translation)?;
 
     Ok(FileModeParams::new(
         resolved.scripts,
@@ -228,6 +231,7 @@ async fn file_mode_params_from_config(
         resolved.multi_source_max_sources,
         resolved.source_priority,
         mapper,
+        translator,
     ))
 }
 
@@ -259,6 +263,7 @@ mod config_mapping_tests {
             multi_source_max_sources: 3,
             source_priority: crate::source_priority::SourcePriority::default(),
             node_mapping_csv: Vec::new(),
+            translation: crate::translation::ResolvedTranslationConfig::default(),
         };
         let fetch = fetch_mode_params_from_config(resolved);
         assert_eq!(fetch.fetch_threads(), 0);
@@ -306,6 +311,7 @@ mod config_mapping_tests {
             multi_source_max_sources: 2,
             source_priority: crate::source_priority::SourcePriority::default(),
             node_mapping_csv: Vec::new(),
+            translation: crate::translation::ResolvedTranslationConfig::default(),
         };
 
         let deduped = dedupe_resolved_script_aliases(resolved)
@@ -348,6 +354,7 @@ mod config_mapping_tests {
             multi_source_max_sources: 2,
             source_priority: crate::source_priority::SourcePriority::default(),
             node_mapping_csv: Vec::new(),
+            translation: crate::translation::ResolvedTranslationConfig::default(),
         };
 
         let deduped = dedupe_resolved_name_script_aliases(resolved)
@@ -377,10 +384,12 @@ async fn run_lua_nfo(
     multi_source_max_sources: u32,
     source_priority: &SourcePriority,
     node_mapping_csv: &[std::path::PathBuf],
+    translation: &crate::translation::ResolvedTranslationConfig,
     output: &Path,
 ) -> Result<(), AppError> {
     let task = TaskContext::new("name");
     let mapper = source_runner::load_node_value_mapper(node_mapping_csv).await?;
+    let translator = MovieTranslator::new(translation)?;
     let xml = if save_images {
         let mut source_output = source_runner::run_name_scripts_output(
             &task.id,
@@ -390,6 +399,7 @@ async fn run_lua_nfo(
             multi_source_max_sources,
             source_priority,
             &mapper,
+            &translator,
             name,
             ScriptThrottleConfig::disabled(),
         )
@@ -418,6 +428,7 @@ async fn run_lua_nfo(
             multi_source_max_sources,
             source_priority,
             &mapper,
+            &translator,
             name,
             ScriptThrottleConfig::disabled(),
         )

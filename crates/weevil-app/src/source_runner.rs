@@ -10,6 +10,7 @@ use crate::errors::AppError;
 use crate::nfo::Movie;
 use crate::script_throttle::{ScriptThrottleConfig, run_with_throttle};
 use crate::source_priority::SourcePriority;
+use crate::translation::MovieTranslator;
 
 mod merge;
 mod node_mapping;
@@ -34,6 +35,7 @@ pub(crate) async fn run_name_scripts(
     multi_source_max_sources: u32,
     source_priority: &SourcePriority,
     mapper: &NodeValueMapper,
+    translator: &MovieTranslator,
     name: &str,
     script_throttle: ScriptThrottleConfig,
 ) -> Result<String, AppError> {
@@ -45,6 +47,7 @@ pub(crate) async fn run_name_scripts(
         multi_source_max_sources,
         source_priority,
         mapper,
+        translator,
         name,
         script_throttle,
     )
@@ -60,6 +63,7 @@ pub(crate) async fn run_name_scripts_output(
     multi_source_max_sources: u32,
     source_priority: &SourcePriority,
     mapper: &NodeValueMapper,
+    translator: &MovieTranslator,
     name: &str,
     script_throttle: ScriptThrottleConfig,
 ) -> Result<FileScriptOutput, AppError> {
@@ -119,8 +123,9 @@ pub(crate) async fn run_name_scripts_output(
     }
 
     mapper.apply_movie(&mut first.movie);
+    let translated = translator.translate_movie(&mut first.movie).await?;
 
-    let xml = if merged_sources || mapper.has_rules() {
+    let xml = if merged_sources || mapper.has_rules() || translated {
         serialize_movie(&first.movie)?
     } else {
         first.xml
@@ -142,6 +147,7 @@ pub(crate) async fn run_file_scripts(
     multi_source_max_sources: u32,
     source_priority: &SourcePriority,
     mapper: &NodeValueMapper,
+    translator: &MovieTranslator,
     input_name: &str,
     input_path: &str,
     script_throttle: ScriptThrottleConfig,
@@ -205,8 +211,9 @@ pub(crate) async fn run_file_scripts(
     }
 
     mapper.apply_movie(&mut first.movie);
+    let translated = translator.translate_movie(&mut first.movie).await?;
 
-    let xml = if merged_sources || mapper.has_rules() {
+    let xml = if merged_sources || mapper.has_rules() || translated {
         serialize_movie(&first.movie)?
     } else {
         first.xml

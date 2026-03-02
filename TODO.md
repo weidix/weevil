@@ -15,7 +15,7 @@
 - [x] Support passing multiple input files in `file` mode for unified migration and naming of split parts.
 - [x] Support auto-detecting split video parts in the same directory in `dir` and `watch` modes, then applying unified migration and naming.
 - [x] Support `tag` and other node-name mapping.
-- [ ] Add configurable translation endpoints (OpenAPI-compatible, Google Translate, DeepL, etc.), allow configuring which keys to translate (e.g., `title`, `originaltitle`), and define behavior: if the key list is empty, do not translate. Add a target translation language parameter; this target language is also used to detect whether configured field content is already in the target language, and translation is called only when content is not in that language.
+- [x] Add configurable translation endpoints (OpenAI-style, Google Translate, DeepL, etc.), allow configuring which keys to translate (e.g., `title`, `originaltitle`), and define behavior: if the key list is empty, do not translate. Add a target translation language parameter; this target language is also used to detect whether configured field content is already in the target language, and translation is called only when content is not in that language.
 
 ## weevil-lua
 - [x] Expose `weevil.html` / `selector` / `xpath` / `http` / `json` / `log` APIs.
