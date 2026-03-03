@@ -1,0 +1,7 @@
+target
+.git
+.github
+.codex
+demo_lua
+weevil.toml
+.DS_Store
