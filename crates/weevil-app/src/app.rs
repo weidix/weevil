@@ -46,6 +46,8 @@ pub(crate) async fn run() -> Result<(), AppError> {
                 })
                 .await?;
             let resolved = dedupe_resolved_name_script_aliases(resolved).await?;
+            warn_unknown_source_priority_aliases(&resolved.scripts, &resolved.source_priority)
+                .await?;
             run_lua_nfo(
                 &name,
                 &resolved.scripts,
@@ -90,6 +92,8 @@ pub(crate) async fn run() -> Result<(), AppError> {
                 })
                 .await?;
             let resolved = dedupe_resolved_script_aliases(resolved).await?;
+            warn_unknown_source_priority_aliases(&resolved.scripts, &resolved.source_priority)
+                .await?;
             let params = file_mode_params_from_config(resolved).await?;
             file_mode::run_file_mode_inputs(&input, &params, ScriptThrottleConfig::disabled()).await
         }
@@ -129,6 +133,7 @@ pub(crate) async fn run() -> Result<(), AppError> {
             let input = resolved.input;
             let max_depth = resolved.max_depth;
             let mode = dedupe_resolved_script_aliases(resolved.mode).await?;
+            warn_unknown_source_priority_aliases(&mode.scripts, &mode.source_priority).await?;
             let params = file_mode_params_from_config(mode.clone()).await?;
             let fetch = fetch_mode_params_from_config(mode);
             dir_mode::run_dir_mode(&input, &params, &fetch, max_depth).await
@@ -169,6 +174,7 @@ pub(crate) async fn run() -> Result<(), AppError> {
             let input = resolved.input;
             let max_depth = resolved.max_depth;
             let mode = dedupe_resolved_script_aliases(resolved.mode).await?;
+            warn_unknown_source_priority_aliases(&mode.scripts, &mode.source_priority).await?;
             let params = file_mode_params_from_config(mode.clone()).await?;
             let fetch = fetch_mode_params_from_config(mode);
             watch_mode::run_watch_mode(&input, &params, &fetch, max_depth).await
@@ -213,6 +219,53 @@ async fn dedupe_script_aliases_with_warning(
     }
 
     Ok(deduped)
+}
+
+async fn warn_unknown_source_priority_aliases(
+    scripts: &[std::path::PathBuf],
+    source_priority: &SourcePriority,
+) -> Result<(), AppError> {
+    if !source_priority.is_configured() {
+        return Ok(());
+    }
+
+    let mut active_aliases = HashSet::with_capacity(scripts.len());
+    for script in scripts {
+        active_aliases.insert(script_alias_from_path(script).await?);
+    }
+
+    let unknown_images = unknown_source_priority_aliases(source_priority.images(), &active_aliases);
+    if !unknown_images.is_empty() {
+        warn!(
+            "source-priority images contains aliases not present in active scripts: {unknown_images:?}"
+        );
+    }
+
+    let unknown_details =
+        unknown_source_priority_aliases(source_priority.details(), &active_aliases);
+    if !unknown_details.is_empty() {
+        warn!(
+            "source-priority details contains aliases not present in active scripts: {unknown_details:?}"
+        );
+    }
+
+    Ok(())
+}
+
+fn unknown_source_priority_aliases(
+    priorities: &[String],
+    active_aliases: &HashSet<String>,
+) -> Vec<String> {
+    let mut unknown = Vec::new();
+    for alias in priorities {
+        if active_aliases.contains(alias) {
+            continue;
+        }
+        if !unknown.iter().any(|value| value == alias) {
+            unknown.push(alias.clone());
+        }
+    }
+    unknown
 }
 
 async fn file_mode_params_from_config(

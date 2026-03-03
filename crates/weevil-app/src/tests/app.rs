@@ -1,7 +1,10 @@
+use std::collections::HashSet;
+
 use mlua::Value;
 
 use crate::config::AppConfig;
 use crate::script_info;
+use crate::source_priority::{SourcePriority, SourcePriorityConfig};
 use crate::source_runner;
 
 #[tokio::test]
@@ -115,4 +118,50 @@ fn render_nfo_from_string() {
     let xml =
         source_runner::render_nfo_output(Some(Value::String(text)), &lua).expect("expected xml");
     assert_eq!(xml, "<movie />");
+}
+
+#[test]
+fn unknown_source_priority_aliases_returns_only_missing_aliases() {
+    let priorities = vec![
+        "dmm".to_string(),
+        "javbus".to_string(),
+        "dmm".to_string(),
+        "javdb".to_string(),
+    ];
+    let active = HashSet::from(["javbus".to_string(), "javdb".to_string()]);
+
+    let unknown = super::unknown_source_priority_aliases(&priorities, &active);
+    assert_eq!(unknown, vec!["dmm".to_string()]);
+}
+
+#[tokio::test]
+async fn warn_unknown_source_priority_aliases_accepts_missing_aliases() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let first = dir.path().join("a.lua");
+    let second = dir.path().join("b.lua");
+
+    tokio::fs::write(
+        &first,
+        r#"return { alias = "javdb", trusted_urls = {}, run = function() return nil end }"#,
+    )
+    .await
+    .expect("write first");
+    tokio::fs::write(
+        &second,
+        r#"return { alias = "javbus", trusted_urls = {}, run = function() return nil end }"#,
+    )
+    .await
+    .expect("write second");
+
+    let priority_config: SourcePriorityConfig = toml::from_str(
+        r#"
+images = ["dmm", "javbus", "javdb"]
+details = ["javdb"]
+"#,
+    )
+    .expect("priority config");
+    let priority = SourcePriority::from_mode_and_shared(Some(&priority_config), None);
+
+    let result = super::warn_unknown_source_priority_aliases(&[first, second], &priority).await;
+    assert!(result.is_ok());
 }
