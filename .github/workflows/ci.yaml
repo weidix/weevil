@@ -69,3 +69,5 @@ jobs:
           push: false
           platforms: linux/amd64,linux/arm64
           tags: local/weevil:ci
+          cache-from: type=gha,scope=weevil-ci-docker
+          cache-to: type=gha,mode=max,scope=weevil-ci-docker

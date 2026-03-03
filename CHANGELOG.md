@@ -5,10 +5,10 @@ All notable changes to this project are documented in this file.
 The format is based on Keep a Changelog,
 and this project follows Semantic Versioning.
 
-## [0.1.0] - Unreleased
+## [1.0.0] - 2026-03-03
 
-This is the initial release track and has not been published yet.
-The section below lists the full current capability set for `0.1.0`.
+This is the first stable release track.
+The section below lists the full current capability set for `1.0.0`.
 
 ### Added
 - Workspace structure with three crates:
@@ -45,10 +45,12 @@ The section below lists the full current capability set for `0.1.0`.
 ### Included Libraries and Versions
 
 #### Workspace
-- Set workspace package version to `0.1.0`.
+- Set CLI crate `weevil-app` version to `1.0.0`.
 - Set edition to Rust `2024`.
 
 #### weevil-core
+- Set crate version to `0.1.0` (independent from CLI version).
+- Keep API in repository-stable state only; semver stability for public library usage is not guaranteed yet.
 - Added/paralleled core parser/query dependencies:
   - `cssparser 0.36`
   - `html5ever 0.38`
@@ -62,6 +64,8 @@ The section below lists the full current capability set for `0.1.0`.
   - `ureq 3`
 
 #### weevil-lua
+- Set crate version to `0.1.0` (independent from CLI version).
+- Keep API in repository-stable state only; semver stability for public library usage is not guaranteed yet.
 - Added runtime/bridge dependencies:
   - `mlua 0.11` (with `lua55`, `vendored`)
   - `reqwest 0.13` (blocking + http2 + rustls, default features disabled)
@@ -78,8 +82,8 @@ The section below lists the full current capability set for `0.1.0`.
   - `clap 4`
   - `fs2 0.4`
   - `mlua 0.11` (with `lua55`, `vendored`, `serde`)
-  - `notify 6`
-  - `quick-xml 0.37` (feature: `serialize`)
+  - `notify 8`
+  - `quick-xml 0.38` (feature: `serialize`)
   - `serde 1` (feature: `derive`)
   - `tracing 0.1`
   - `tracing-subscriber 0.3`

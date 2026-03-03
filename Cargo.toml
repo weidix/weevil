@@ -7,6 +7,21 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.1.0"
+version = "1.0.0"
 edition = "2024"
 license = "MIT"
+authors = ["weevil contributors <maintainers@example.invalid>"]
+description = "Script-driven toolkit for scraping metadata and generating NFO files for videos."
+repository = "https://example.invalid/weevil"
+homepage = "https://example.invalid/weevil"
+readme = "README.md"
+keywords = ["nfo", "scraper", "lua", "metadata", "cli"]
+categories = ["command-line-utilities", "multimedia"]
+rust-version = "1.92"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
+panic = "abort"

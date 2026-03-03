@@ -5,13 +5,18 @@
 It is intentionally **not** a fully built-in scraper product. Site-specific logic (search rules,
 parsing, anti-bot handling, field mapping) is provided by scripts, currently via Lua.
 
+## Version
+
+Current CLI release line: `1.0.0` (`weevil-app`).
+Internal libraries `weevil-core` and `weevil-lua` use independent `0.x` versions and are not semver-stable as standalone public libraries yet.
+
 ## Workspace Layout
 
 - `crates/weevil-app`: CLI binary (`weevil`) for name/file/dir/watch flows.
 - `crates/weevil-lua`: Lua runtime bridge (`weevil.*` APIs, trusted HTTP client, logging, JSON).
 - `crates/weevil-core`: HTML tree, CSS selector engine, XPath subset executor.
 
-## Current Capabilities (2026)
+## Current Capabilities (v1.0.0, 2026)
 
 - Generate NFO by title (`name` mode).
 - Process one or multiple video files (`file` mode):
