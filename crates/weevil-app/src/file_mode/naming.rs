@@ -13,6 +13,7 @@ pub(crate) use super::input_name::format_input_name;
 
 struct TemplateRender {
     rendered: String,
+    missing_actor_value: bool,
 }
 
 pub(crate) fn build_file_name(base: &str, extension: Option<&str>) -> String {
@@ -27,7 +28,7 @@ pub(crate) fn format_output_paths(
     movie: &Movie,
     fallback: &str,
 ) -> Result<Vec<PathBuf>, AppError> {
-    let default_render = render_template(template, movie)?;
+    let default_render = render_template_with_meta(template, movie, None, true)?;
     let fields = collect_template_fields(template)?;
     let mut expand_actor = false;
     let mut expand_genre = false;
@@ -78,7 +79,10 @@ pub(crate) fn format_output_paths(
                         if let Some(value) = credits.as_ref() {
                             scoped.credits = vec![value.clone()];
                         }
-                        let rendered = render_template_with_meta(template, &scoped, actor)?;
+                        let rendered = render_template_with_meta(template, &scoped, actor, true)?;
+                        if rendered.missing_actor_value {
+                            continue;
+                        }
                         if rendered.rendered.trim().is_empty() {
                             continue;
                         }
@@ -93,11 +97,12 @@ pub(crate) fn format_output_paths(
     }
 
     if paths.is_empty() {
-        let resolved = if default_render.trim().is_empty() {
-            fallback
-        } else {
-            default_render.as_str()
-        };
+        let resolved =
+            if default_render.rendered.trim().is_empty() || default_render.missing_actor_value {
+                fallback
+            } else {
+                default_render.rendered.as_str()
+            };
         let path = format_output_path_resolved(template, resolved)?;
         paths.push(path);
     }
@@ -166,16 +171,19 @@ fn collect_template_fields(template: &str) -> Result<Vec<String>, AppError> {
     Ok(fields)
 }
 
+#[cfg(test)]
 pub(crate) fn render_template(template: &str, movie: &Movie) -> Result<String, AppError> {
-    render_template_with_meta(template, movie, None).map(|rendered| rendered.rendered)
+    render_template_with_meta(template, movie, None, false).map(|rendered| rendered.rendered)
 }
 
 fn render_template_with_meta(
     template: &str,
     movie: &Movie,
     actor: Option<&Actor>,
+    sanitize_values: bool,
 ) -> Result<TemplateRender, AppError> {
     let mut out = String::new();
+    let mut missing_actor_value = false;
     let mut chars = template.chars().peekable();
     while let Some(ch) = chars.next() {
         match ch {
@@ -208,12 +216,24 @@ fn render_template_with_meta(
                     });
                 }
                 if let Some(spec) = parse_actor_field(field, template)? {
-                    if let Some(value) = render_actor_field(&movie.actor, actor, &spec) {
+                    if let Some(mut value) = render_actor_field(&movie.actor, actor, &spec) {
+                        if sanitize_values {
+                            value = sanitize_component(&value);
+                        }
+                        if value.is_empty() {
+                            missing_actor_value = true;
+                            continue;
+                        }
                         out.push_str(&value);
+                    } else {
+                        missing_actor_value = true;
                     }
                 } else {
                     let value = lookup_field(movie, field, template)?;
-                    if let Some(value) = value {
+                    if let Some(mut value) = value {
+                        if sanitize_values {
+                            value = sanitize_component(&value);
+                        }
                         out.push_str(&value);
                     }
                 }
@@ -232,7 +252,10 @@ fn render_template_with_meta(
             other => out.push(other),
         }
     }
-    Ok(TemplateRender { rendered: out })
+    Ok(TemplateRender {
+        rendered: out,
+        missing_actor_value,
+    })
 }
 
 fn lookup_field(movie: &Movie, field: &str, template: &str) -> Result<Option<String>, AppError> {

@@ -177,6 +177,42 @@ fn sanitize_component_replaces_illegal_chars() {
 }
 
 #[test]
+fn format_output_paths_sanitizes_slash_in_values_without_creating_extra_levels() {
+    let movie = Movie {
+        title: Some("A/B".to_string()),
+        genre: vec!["Action/Adventure".to_string()],
+        ..Movie::default()
+    };
+    let paths = format_output_paths("{genre}/{title}", &movie, "fallback").expect("paths");
+    assert_eq!(paths, vec![PathBuf::from("Action_Adventure").join("A_B")]);
+}
+
+#[test]
+fn format_output_paths_actor_filter_does_not_emit_paths_for_non_matching_actor() {
+    let movie = Movie {
+        title: Some("Example".to_string()),
+        actor: vec![
+            Actor {
+                name: Some("Alice".to_string()),
+                gender: Some("female".to_string()),
+                order: Some(1),
+                ..Actor::default()
+            },
+            Actor {
+                name: Some("Bob".to_string()),
+                gender: Some("male".to_string()),
+                order: Some(2),
+                ..Actor::default()
+            },
+        ],
+        ..Movie::default()
+    };
+    let paths = format_output_paths("{actor[gender=female,order=1]}/{title}", &movie, "fallback")
+        .expect("paths");
+    assert_eq!(paths, vec![PathBuf::from("Alice").join("Example")]);
+}
+
+#[test]
 fn render_template_actor_gender() {
     let movie = Movie {
         actor: vec![
