@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 
-FROM rust:1.92-bookworm AS builder
+FROM --platform=$BUILDPLATFORM rust:1.92-bookworm AS builder
 
 ARG TARGETARCH
 
@@ -9,21 +9,29 @@ RUN apt-get update \
         ca-certificates \
         clang \
         cmake \
+        curl \
         make \
-        musl-tools \
         perl \
         pkg-config \
+        xz-utils \
     && rm -rf /var/lib/apt/lists/*
+
+RUN set -eux; \
+    ZIG_VERSION=0.13.0; \
+    case "$(dpkg --print-architecture)" in \
+        amd64) ZIG_ARCH=x86_64 ;; \
+        arm64) ZIG_ARCH=aarch64 ;; \
+        *) echo "unsupported build architecture" && exit 1 ;; \
+    esac; \
+    curl -fsSL "https://ziglang.org/download/${ZIG_VERSION}/zig-linux-${ZIG_ARCH}-${ZIG_VERSION}.tar.xz" \
+      | tar -xJ -C /opt; \
+    ln -sf "/opt/zig-linux-${ZIG_ARCH}-${ZIG_VERSION}/zig" /usr/local/bin/zig; \
+    cargo install --locked cargo-zigbuild
 
 WORKDIR /workspace
 
 COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
-
-ENV CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER=musl-gcc \
-    CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=musl-gcc \
-    CC_x86_64_unknown_linux_musl=musl-gcc \
-    CC_aarch64_unknown_linux_musl=musl-gcc
 
 RUN case "${TARGETARCH}" in \
         amd64) RUST_TARGET=x86_64-unknown-linux-musl ;; \
@@ -31,7 +39,7 @@ RUN case "${TARGETARCH}" in \
         *) echo "unsupported TARGETARCH: ${TARGETARCH}" && exit 1 ;; \
     esac \
     && rustup target add "${RUST_TARGET}" \
-    && cargo build --release -p weevil-app --target "${RUST_TARGET}" \
+    && cargo zigbuild --release -p weevil-app --target "${RUST_TARGET}" \
     && install -D "target/${RUST_TARGET}/release/weevil" /out/weevil
 
 FROM scratch AS runtime
