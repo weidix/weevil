@@ -57,13 +57,13 @@ docker run --rm \
 
 ## Documentation / Wiki
 
-To keep this README focused, detailed docs moved to wiki-style pages:
+Detailed references are hosted in GitHub Wiki:
 
-- [Wiki Index](docs/wiki/README.md)
-- [Normal Usage Guide](docs/wiki/normal-usage.md)
-- [Docker Guide](docs/wiki/docker.md)
-- [Config and Modes](docs/wiki/config-reference.md)
-- [Lua Script Contract](docs/wiki/lua-script-contract.md)
+- [Wiki Home](https://github.com/weidix/weevil/wiki)
+- [Normal Usage](https://github.com/weidix/weevil/wiki/Normal-Usage)
+- [Docker](https://github.com/weidix/weevil/wiki/Docker)
+- [Config Reference](https://github.com/weidix/weevil/wiki/Config-Reference)
+- [Lua Script Contract](https://github.com/weidix/weevil/wiki/Lua-Script-Contract)
 
 ## Workspace Layout
 
