@@ -27,61 +27,45 @@ pub(crate) struct FileScriptOutput {
     pub(crate) merged_sources: bool,
 }
 
+pub(crate) struct ScriptRunConfig<'a> {
+    pub(crate) task_id: &'a str,
+    pub(crate) task_kind: &'static str,
+    pub(crate) scripts: &'a [PathBuf],
+    pub(crate) multi_source: bool,
+    pub(crate) multi_source_max_sources: u32,
+    pub(crate) source_priority: &'a SourcePriority,
+    pub(crate) mapper: &'a NodeValueMapper,
+    pub(crate) translator: &'a MovieTranslator,
+    pub(crate) script_throttle: ScriptThrottleConfig,
+}
+
 pub(crate) async fn run_name_scripts(
-    task_id: &str,
-    task_kind: &'static str,
-    scripts: &[PathBuf],
-    multi_source: bool,
-    multi_source_max_sources: u32,
-    source_priority: &SourcePriority,
-    mapper: &NodeValueMapper,
-    translator: &MovieTranslator,
+    config: &ScriptRunConfig<'_>,
     name: &str,
-    script_throttle: ScriptThrottleConfig,
 ) -> Result<String, AppError> {
-    let output = run_name_scripts_output(
-        task_id,
-        task_kind,
-        scripts,
-        multi_source,
-        multi_source_max_sources,
-        source_priority,
-        mapper,
-        translator,
-        name,
-        script_throttle,
-    )
-    .await?;
+    let output = run_name_scripts_output(config, name).await?;
     Ok(output.xml)
 }
 
 pub(crate) async fn run_name_scripts_output(
-    task_id: &str,
-    task_kind: &'static str,
-    scripts: &[PathBuf],
-    multi_source: bool,
-    multi_source_max_sources: u32,
-    source_priority: &SourcePriority,
-    mapper: &NodeValueMapper,
-    translator: &MovieTranslator,
+    config: &ScriptRunConfig<'_>,
     name: &str,
-    script_throttle: ScriptThrottleConfig,
 ) -> Result<FileScriptOutput, AppError> {
     let mut sources = Vec::new();
     let mut last_error = None;
     let success_limit = success_limit(
-        multi_source,
-        multi_source_max_sources,
-        source_priority.is_configured(),
+        config.multi_source,
+        config.multi_source_max_sources,
+        config.source_priority.is_configured(),
     );
 
-    for script in scripts {
+    for script in config.scripts {
         match run_script(
-            task_id,
-            task_kind,
+            config.task_id,
+            config.task_kind,
             script,
             ScriptCallArgs::Name { name },
-            script_throttle,
+            config.script_throttle,
         )
         .await
         {
@@ -101,8 +85,11 @@ pub(crate) async fn run_name_scripts_output(
         return Err(last_error.unwrap_or_else(no_scripts_configured_error));
     }
 
-    let merged_sources =
-        should_merge_sources(multi_source, source_priority.is_configured(), sources.len());
+    let merged_sources = should_merge_sources(
+        config.multi_source,
+        config.source_priority.is_configured(),
+        sources.len(),
+    );
     let mut first = sources.remove(0);
     if merged_sources {
         let mut merge_sources = Vec::with_capacity(sources.len() + 1);
@@ -116,16 +103,17 @@ pub(crate) async fn run_name_scripts_output(
                 movie: source.movie.clone(),
             });
         }
-        first.movie = merge_sources_movie(&merge_sources, source_priority, multi_source);
+        first.movie =
+            merge_sources_movie(&merge_sources, config.source_priority, config.multi_source);
     }
     for source in sources {
         merge_trusted_urls(&mut first.trusted_urls, source.trusted_urls);
     }
 
-    mapper.apply_movie(&mut first.movie);
-    let translated = translator.translate_movie(&mut first.movie).await?;
+    config.mapper.apply_movie(&mut first.movie);
+    let translated = config.translator.translate_movie(&mut first.movie).await?;
 
-    let xml = if merged_sources || mapper.has_rules() || translated {
+    let xml = if merged_sources || config.mapper.has_rules() || translated {
         serialize_movie(&first.movie)?
     } else {
         first.xml
@@ -140,36 +128,28 @@ pub(crate) async fn run_name_scripts_output(
 }
 
 pub(crate) async fn run_file_scripts(
-    task_id: &str,
-    task_kind: &'static str,
-    scripts: &[PathBuf],
-    multi_source: bool,
-    multi_source_max_sources: u32,
-    source_priority: &SourcePriority,
-    mapper: &NodeValueMapper,
-    translator: &MovieTranslator,
+    config: &ScriptRunConfig<'_>,
     input_name: &str,
     input_path: &str,
-    script_throttle: ScriptThrottleConfig,
 ) -> Result<FileScriptOutput, AppError> {
     let mut sources = Vec::new();
     let mut last_error = None;
     let success_limit = success_limit(
-        multi_source,
-        multi_source_max_sources,
-        source_priority.is_configured(),
+        config.multi_source,
+        config.multi_source_max_sources,
+        config.source_priority.is_configured(),
     );
 
-    for script in scripts {
+    for script in config.scripts {
         match run_script(
-            task_id,
-            task_kind,
+            config.task_id,
+            config.task_kind,
             script,
             ScriptCallArgs::File {
                 input_name,
                 input_path,
             },
-            script_throttle,
+            config.script_throttle,
         )
         .await
         {
@@ -189,8 +169,11 @@ pub(crate) async fn run_file_scripts(
         return Err(last_error.unwrap_or_else(no_scripts_configured_error));
     }
 
-    let merged_sources =
-        should_merge_sources(multi_source, source_priority.is_configured(), sources.len());
+    let merged_sources = should_merge_sources(
+        config.multi_source,
+        config.source_priority.is_configured(),
+        sources.len(),
+    );
     let mut first = sources.remove(0);
     if merged_sources {
         let mut merge_sources = Vec::with_capacity(sources.len() + 1);
@@ -204,16 +187,17 @@ pub(crate) async fn run_file_scripts(
                 movie: source.movie.clone(),
             });
         }
-        first.movie = merge_sources_movie(&merge_sources, source_priority, multi_source);
+        first.movie =
+            merge_sources_movie(&merge_sources, config.source_priority, config.multi_source);
     }
     for source in sources {
         merge_trusted_urls(&mut first.trusted_urls, source.trusted_urls);
     }
 
-    mapper.apply_movie(&mut first.movie);
-    let translated = translator.translate_movie(&mut first.movie).await?;
+    config.mapper.apply_movie(&mut first.movie);
+    let translated = config.translator.translate_movie(&mut first.movie).await?;
 
-    let xml = if merged_sources || mapper.has_rules() || translated {
+    let xml = if merged_sources || config.mapper.has_rules() || translated {
         serialize_movie(&first.movie)?
     } else {
         first.xml
@@ -294,7 +278,7 @@ async fn run_script(
         .map_err(|err| AppError::FetchRuntime {
             reason: format!("failed to read script {script:?}: {err}"),
         })?;
-    let plugin = LuaPlugin::from_str(&script_source).map_err(AppError::LuaPlugin)?;
+    let plugin = LuaPlugin::from_script(&script_source).map_err(AppError::LuaPlugin)?;
     let alias = plugin.alias().to_string();
     plugin.set_log_context(task_id.to_string(), task_kind);
 

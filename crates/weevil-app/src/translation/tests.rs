@@ -99,7 +99,7 @@ model = "gpt-test"
 
 #[tokio::test]
 async fn translate_movie_skips_target_language_values() {
-    let (endpoint, calls) = endpoints::StubEndpoint::new("T:");
+    let (endpoint, calls) = endpoints::StubEndpoint::with_prefix("T:");
     let translator = MovieTranslator::new_for_tests(
         "en",
         vec![TranslationKey::Title, TranslationKey::Plot],

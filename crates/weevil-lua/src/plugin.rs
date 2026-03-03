@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 use std::sync::Arc;
 
 use mlua::{IntoLuaMulti, Lua, RegistryKey, Value};
@@ -40,7 +41,7 @@ pub struct LuaPlugin {
 }
 
 impl LuaPlugin {
-    pub fn from_str(script: &str) -> Result<Self, LuaPluginError> {
+    pub fn from_script(script: &str) -> Result<Self, LuaPluginError> {
         let lua = Lua::new();
         install_module(&lua, HttpMode::Disabled)?;
         let table = eval_script_table(&lua, script)?;
@@ -69,7 +70,7 @@ impl LuaPlugin {
             path: path.to_path_buf(),
             source: err,
         })?;
-        Self::from_str(&contents)
+        Self::from_script(&contents)
     }
 
     pub fn check(script: &str) -> Result<LuaPluginSpec, LuaPluginError> {
@@ -134,6 +135,14 @@ impl LuaPlugin {
         let run = self.lua.registry_value::<mlua::Function>(&self.run_key)?;
         let output = run.call_async::<Option<Value>>(args).await?;
         Ok(output)
+    }
+}
+
+impl FromStr for LuaPlugin {
+    type Err = LuaPluginError;
+
+    fn from_str(script: &str) -> Result<Self, Self::Err> {
+        LuaPlugin::from_script(script)
     }
 }
 

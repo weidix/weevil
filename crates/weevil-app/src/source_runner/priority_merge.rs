@@ -30,10 +30,8 @@ pub(crate) fn merge_sources_movie(
         for source in detail_sources {
             merge_movie_details(&mut merged, &source.movie);
         }
-    } else {
-        if let Some(source) = detail_sources.first() {
-            merge_movie_details(&mut merged, &source.movie);
-        }
+    } else if let Some(source) = detail_sources.first() {
+        merge_movie_details(&mut merged, &source.movie);
     }
 
     if let Some(source) = select_image_source(&image_sources) {

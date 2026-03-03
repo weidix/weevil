@@ -285,7 +285,7 @@ fn render_template_actor_role_and_order() {
 fn format_input_name_applies_legacy_rule_tokens_and_collapses_whitespace() {
     let formatted = format_input_name(
         "Movie 1080p   WEB-DL",
-        &vec!["1080p".to_string(), "WEB-DL".to_string()],
+        &["1080p".to_string(), "WEB-DL".to_string()],
     )
     .expect("formatted");
     assert_eq!(formatted, "Movie");
@@ -293,6 +293,6 @@ fn format_input_name_applies_legacy_rule_tokens_and_collapses_whitespace() {
 
 #[test]
 fn format_input_name_empty_is_error() {
-    let error = format_input_name("1080p", &vec!["1080p".to_string()]).expect_err("expected error");
+    let error = format_input_name("1080p", &["1080p".to_string()]).expect_err("expected error");
     assert!(matches!(error, AppError::InputNameRuleResultEmpty { .. }));
 }

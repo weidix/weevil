@@ -93,7 +93,7 @@ async fn create_soft_link(from: &Path, to: &Path) -> Result<(), std::io::Error> 
         }
     })
     .await
-    .map_err(|err| std::io::Error::new(std::io::ErrorKind::Other, format!("{err}")))?
+    .map_err(|err| std::io::Error::other(format!("{err}")))?
 }
 
 fn is_cross_device_error(error: &std::io::Error) -> bool {

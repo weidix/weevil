@@ -98,13 +98,13 @@ fn filter_tokens(tokens: &Tokens, drop: fn(&str) -> bool) -> Tokens {
 }
 
 fn is_noise_token(token: &str) -> bool {
-    if token.len() >= 4 && token.ends_with('p') {
-        if token[..token.len() - 1]
+    if token.len() >= 4
+        && token.ends_with('p')
+        && token[..token.len() - 1]
             .chars()
             .all(|ch| ch.is_ascii_digit())
-        {
-            return true;
-        }
+    {
+        return true;
     }
 
     matches!(

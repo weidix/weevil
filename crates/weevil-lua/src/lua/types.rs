@@ -392,7 +392,7 @@ impl UserData for LuaXPath {
 fn element_attr_names(element: Option<&ElementData>) -> Vec<String> {
     element
         .map(|element| element.attr_names().map(str::to_string).collect())
-        .unwrap_or_else(Vec::new)
+        .unwrap_or_default()
 }
 
 enum IndexQuery {

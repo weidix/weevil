@@ -25,6 +25,18 @@ pub(crate) struct FileModeParams {
     movie_translator: MovieTranslator,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct FileModeConfig {
+    pub(crate) scripts: Vec<PathBuf>,
+    pub(crate) output_template: String,
+    pub(crate) input_name_rules: Vec<String>,
+    pub(crate) folder_multi: MultiFolderStrategy,
+    pub(crate) multi_source: bool,
+    pub(crate) save_images: bool,
+    pub(crate) multi_source_max_sources: u32,
+    pub(crate) source_priority: SourcePriority,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct FetchModeParams {
     fetch_threads: u32,
@@ -64,26 +76,19 @@ impl FetchModeParams {
 
 impl FileModeParams {
     pub(crate) fn new(
-        scripts: Vec<PathBuf>,
-        output_template: String,
-        input_name_rules: Vec<String>,
-        folder_multi: MultiFolderStrategy,
-        multi_source: bool,
-        save_images: bool,
-        multi_source_max_sources: u32,
-        source_priority: SourcePriority,
+        config: FileModeConfig,
         node_value_mapper: NodeValueMapper,
         movie_translator: MovieTranslator,
     ) -> Self {
         Self {
-            scripts,
-            output_template,
-            input_name_rules,
-            folder_multi,
-            multi_source,
-            save_images,
-            multi_source_max_sources,
-            source_priority,
+            scripts: config.scripts,
+            output_template: config.output_template,
+            input_name_rules: config.input_name_rules,
+            folder_multi: config.folder_multi,
+            multi_source: config.multi_source,
+            save_images: config.save_images,
+            multi_source_max_sources: config.multi_source_max_sources,
+            source_priority: config.source_priority,
             node_value_mapper,
             movie_translator,
         }
@@ -137,14 +142,16 @@ mod tests {
     #[test]
     fn file_mode_params_exposes_node_value_mapper() {
         let params = FileModeParams::new(
-            vec![],
-            "out/{title}".to_string(),
-            vec![],
-            MultiFolderStrategy::First,
-            false,
-            false,
-            2,
-            SourcePriority::default(),
+            FileModeConfig {
+                scripts: vec![],
+                output_template: "out/{title}".to_string(),
+                input_name_rules: vec![],
+                folder_multi: MultiFolderStrategy::First,
+                multi_source: false,
+                save_images: false,
+                multi_source_max_sources: 2,
+                source_priority: SourcePriority::default(),
+            },
             NodeValueMapper::from_csv("genre,剧情,Drama\n").expect("mapper"),
             MovieTranslator::disabled(),
         );

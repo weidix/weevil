@@ -251,10 +251,10 @@ fn merge_option_string(target: &mut Option<String>, incoming: Option<String>) {
     if target.as_deref().is_some_and(has_content) {
         return;
     }
-    if let Some(value) = incoming {
-        if has_content(value.as_str()) {
-            *target = Some(value.trim().to_string());
-        }
+    if let Some(value) = incoming
+        && has_content(value.as_str())
+    {
+        *target = Some(value.trim().to_string());
     }
 }
 

@@ -133,7 +133,7 @@ fn collect_template_fields(template: &str) -> Result<Vec<String>, AppError> {
                 }
                 let mut key = String::new();
                 let mut closed = false;
-                while let Some(next) = chars.next() {
+                for next in chars.by_ref() {
                     if next == '}' {
                         closed = true;
                         break;
@@ -195,7 +195,7 @@ fn render_template_with_meta(
                 }
                 let mut key = String::new();
                 let mut closed = false;
-                while let Some(next) = chars.next() {
+                for next in chars.by_ref() {
                     if next == '}' {
                         closed = true;
                         break;

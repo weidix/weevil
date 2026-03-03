@@ -14,7 +14,7 @@ use crate::dir_mode;
 use crate::errors::AppError;
 use crate::file_mode;
 use crate::image_store::localize_movie_images;
-use crate::mode_params::{FetchModeParams, FileModeParams, MultiFolderStrategy};
+use crate::mode_params::{FetchModeParams, FileModeConfig, FileModeParams, MultiFolderStrategy};
 use crate::script_info;
 use crate::script_throttle::ScriptThrottleConfig;
 use crate::source_priority::SourcePriority;
@@ -50,14 +50,16 @@ pub(crate) async fn run() -> Result<(), AppError> {
                 .await?;
             run_lua_nfo(
                 &name,
-                &resolved.scripts,
-                resolved.multi_source,
-                resolved.save_images,
-                resolved.multi_source_max_sources,
-                &resolved.source_priority,
-                &resolved.node_mapping_csv,
-                &resolved.translation,
-                &resolved.output,
+                NameNfoRunConfig {
+                    scripts: &resolved.scripts,
+                    multi_source: resolved.multi_source,
+                    save_images: resolved.save_images,
+                    multi_source_max_sources: resolved.multi_source_max_sources,
+                    source_priority: &resolved.source_priority,
+                    node_mapping_csv: &resolved.node_mapping_csv,
+                    translation: &resolved.translation,
+                    output: &resolved.output,
+                },
             )
             .await
         }
@@ -275,14 +277,16 @@ async fn file_mode_params_from_config(
     let translator = MovieTranslator::new(&resolved.translation)?;
 
     Ok(FileModeParams::new(
-        resolved.scripts,
-        resolved.output,
-        resolved.input_name_rules,
-        map_folder_multi(resolved.folder_multi),
-        resolved.multi_source,
-        resolved.save_images,
-        resolved.multi_source_max_sources,
-        resolved.source_priority,
+        FileModeConfig {
+            scripts: resolved.scripts,
+            output_template: resolved.output,
+            input_name_rules: resolved.input_name_rules,
+            folder_multi: map_folder_multi(resolved.folder_multi),
+            multi_source: resolved.multi_source,
+            save_images: resolved.save_images,
+            multi_source_max_sources: resolved.multi_source_max_sources,
+            source_priority: resolved.source_priority,
+        },
         mapper,
         translator,
     ))
@@ -429,40 +433,30 @@ fn map_folder_multi(strategy: FolderMultiStrategy) -> MultiFolderStrategy {
     }
 }
 
-async fn run_lua_nfo(
-    name: &str,
-    scripts: &[std::path::PathBuf],
-    multi_source: bool,
-    save_images: bool,
-    multi_source_max_sources: u32,
-    source_priority: &SourcePriority,
-    node_mapping_csv: &[std::path::PathBuf],
-    translation: &crate::translation::ResolvedTranslationConfig,
-    output: &Path,
-) -> Result<(), AppError> {
+async fn run_lua_nfo(name: &str, config: NameNfoRunConfig<'_>) -> Result<(), AppError> {
     let task = TaskContext::new("name");
-    let mapper = source_runner::load_node_value_mapper(node_mapping_csv).await?;
-    let translator = MovieTranslator::new(translation)?;
-    let xml = if save_images {
-        let mut source_output = source_runner::run_name_scripts_output(
-            &task.id,
-            task.kind,
-            scripts,
-            multi_source,
-            multi_source_max_sources,
-            source_priority,
-            &mapper,
-            &translator,
-            name,
-            ScriptThrottleConfig::disabled(),
-        )
-        .await?;
-        let output_dir = output.parent().unwrap_or_else(|| Path::new("."));
-        let file_base = output
+    let mapper = source_runner::load_node_value_mapper(config.node_mapping_csv).await?;
+    let translator = MovieTranslator::new(config.translation)?;
+    let run_config = source_runner::ScriptRunConfig {
+        task_id: &task.id,
+        task_kind: task.kind,
+        scripts: config.scripts,
+        multi_source: config.multi_source,
+        multi_source_max_sources: config.multi_source_max_sources,
+        source_priority: config.source_priority,
+        mapper: &mapper,
+        translator: &translator,
+        script_throttle: ScriptThrottleConfig::disabled(),
+    };
+    let xml = if config.save_images {
+        let mut source_output = source_runner::run_name_scripts_output(&run_config, name).await?;
+        let output_dir = config.output.parent().unwrap_or_else(|| Path::new("."));
+        let file_base = config
+            .output
             .file_stem()
             .and_then(|value| value.to_str())
             .ok_or_else(|| AppError::PathStemNotUtf8 {
-                path: output.to_path_buf(),
+                path: config.output.to_path_buf(),
             })?;
         localize_movie_images(
             &mut source_output.movie,
@@ -473,28 +467,27 @@ async fn run_lua_nfo(
         .await?;
         source_runner::serialize_movie(&source_output.movie)?
     } else {
-        source_runner::run_name_scripts(
-            &task.id,
-            task.kind,
-            scripts,
-            multi_source,
-            multi_source_max_sources,
-            source_priority,
-            &mapper,
-            &translator,
-            name,
-            ScriptThrottleConfig::disabled(),
-        )
-        .await?
+        source_runner::run_name_scripts(&run_config, name).await?
     };
 
-    tokio::fs::write(output, xml)
+    tokio::fs::write(config.output, xml)
         .await
         .map_err(|err| AppError::OutputWrite {
-            path: output.to_path_buf(),
+            path: config.output.to_path_buf(),
             source: err,
         })?;
     Ok(())
+}
+
+struct NameNfoRunConfig<'a> {
+    scripts: &'a [std::path::PathBuf],
+    multi_source: bool,
+    save_images: bool,
+    multi_source_max_sources: u32,
+    source_priority: &'a SourcePriority,
+    node_mapping_csv: &'a [std::path::PathBuf],
+    translation: &'a crate::translation::ResolvedTranslationConfig,
+    output: &'a Path,
 }
 
 async fn script_alias_from_path(path: &Path) -> Result<String, AppError> {

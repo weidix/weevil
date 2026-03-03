@@ -6,7 +6,7 @@ use tracing_subscriber::prelude::*;
 use weevil_lua::{LuaPlugin, check_script, script_alias};
 
 struct FieldLayer {
-    records: Arc<Mutex<Vec<HashMap<String, String>>>>,
+    records: LogRecords,
 }
 
 impl<S> tracing_subscriber::Layer<S> for FieldLayer
@@ -60,7 +60,10 @@ impl FieldVisitor {
     }
 }
 
-static LOG_RECORDS: OnceLock<Arc<Mutex<Vec<HashMap<String, String>>>>> = OnceLock::new();
+type LogRecordMap = HashMap<String, String>;
+type LogRecords = Arc<Mutex<Vec<LogRecordMap>>>;
+
+static LOG_RECORDS: OnceLock<LogRecords> = OnceLock::new();
 static INIT_TRACING: Once = Once::new();
 
 fn init_test_tracing() {
@@ -141,7 +144,7 @@ return {
   end
 }
 "#;
-    let plugin = LuaPlugin::from_str(script).expect("load plugin");
+    let plugin = LuaPlugin::from_script(script).expect("load plugin");
     let result = plugin.call(()).expect("run plugin");
     let value = result.expect("missing value");
     let text = match value {
@@ -166,7 +169,7 @@ return {
   end
 }
 "#;
-    let plugin = LuaPlugin::from_str(script).expect("load plugin");
+    let plugin = LuaPlugin::from_script(script).expect("load plugin");
     plugin.set_log_context("task-123", "demo");
     let result = plugin.call(()).expect("run plugin");
     let value = result.expect("missing value");
@@ -199,7 +202,7 @@ return {
   end
 }
 "#;
-    let plugin = LuaPlugin::from_str(script).expect("load plugin");
+    let plugin = LuaPlugin::from_script(script).expect("load plugin");
     let err = plugin.call_async(()).await.expect_err("should fail");
     assert!(
         err.to_string()
@@ -218,7 +221,7 @@ return {
   end
 }
 "#;
-    let plugin = LuaPlugin::from_str(&script).expect("load plugin");
+    let plugin = LuaPlugin::from_script(script).expect("load plugin");
     let err = plugin.call_async(()).await.expect_err("should fail");
     assert!(err.to_string().contains("trusted list"));
 }
@@ -234,7 +237,7 @@ return {
   end
 }
 "#;
-    let plugin = LuaPlugin::from_str(&script).expect("load plugin");
+    let plugin = LuaPlugin::from_script(script).expect("load plugin");
     let err = plugin.call_async(()).await.expect_err("should fail");
     assert!(err.to_string().contains("trusted list"));
 }
@@ -250,7 +253,7 @@ return {
   end
 }
 "#;
-    let plugin = LuaPlugin::from_str(&script).expect("load plugin");
+    let plugin = LuaPlugin::from_script(script).expect("load plugin");
     let err = plugin.call_async(()).await.expect_err("should fail");
     assert!(
         err.to_string()
@@ -269,7 +272,7 @@ return {
   end
 }
 "#;
-    let plugin = LuaPlugin::from_str(&script).expect("load plugin");
+    let plugin = LuaPlugin::from_script(script).expect("load plugin");
     let err = plugin.call_async(()).await.expect_err("should fail");
     assert!(
         err.to_string()
@@ -288,7 +291,7 @@ return {
   end
 }
 "#;
-    let plugin = LuaPlugin::from_str(&script).expect("load plugin");
+    let plugin = LuaPlugin::from_script(script).expect("load plugin");
     let err = plugin.call_async(()).await.expect_err("should fail");
     assert!(
         err.to_string()
@@ -307,7 +310,7 @@ return {
   end
 }
 "#;
-    let plugin = LuaPlugin::from_str(&script).expect("load plugin");
+    let plugin = LuaPlugin::from_script(script).expect("load plugin");
     let err = plugin.call_async(()).await.expect_err("should fail");
     assert!(err.to_string().contains("HTTP version must be a string"));
 }
@@ -323,7 +326,7 @@ return {
   end
 }
 "#;
-    let plugin = LuaPlugin::from_str(&script).expect("load plugin");
+    let plugin = LuaPlugin::from_script(script).expect("load plugin");
     let err = plugin.call_async(()).await.expect_err("should fail");
     assert!(err.to_string().contains("HTTP version must be a string"));
 }
@@ -339,7 +342,7 @@ return {
   end
 }
 "#;
-    let plugin = LuaPlugin::from_str(&script).expect("load plugin");
+    let plugin = LuaPlugin::from_script(script).expect("load plugin");
     let err = plugin.call_async(()).await.expect_err("should fail");
     assert!(err.to_string().contains("HTTP version 3 is not supported"));
 }
@@ -347,7 +350,7 @@ return {
 #[test]
 fn from_str_requires_run() {
     let script = "return { alias = \"demo.alias\", trusted_urls = {} }";
-    let err = LuaPlugin::from_str(script).err().expect("should fail");
+    let err = LuaPlugin::from_script(script).err().expect("should fail");
     assert!(err.to_string().contains("run function"));
 }
 
@@ -360,7 +363,7 @@ return {
   run = function() return nil end
 }
 "#;
-    let plugin = LuaPlugin::from_str(script).expect("load plugin");
+    let plugin = LuaPlugin::from_script(script).expect("load plugin");
     let result = plugin.call(()).expect("run plugin");
     assert!(result.is_none());
 }
@@ -392,7 +395,7 @@ return {
   end
 }
 "#;
-    let plugin = LuaPlugin::from_str(script).expect("load plugin");
+    let plugin = LuaPlugin::from_script(script).expect("load plugin");
     let result = plugin.call(()).expect("run plugin").expect("missing value");
     let table = match result {
         mlua::Value::Table(table) => table,
@@ -429,7 +432,7 @@ return {
   end
 }
 "#;
-    let plugin = LuaPlugin::from_str(script).expect("load plugin");
+    let plugin = LuaPlugin::from_script(script).expect("load plugin");
     let result = plugin.call(()).expect("run plugin").expect("missing value");
     let table = match result {
         mlua::Value::Table(table) => table,
@@ -456,7 +459,7 @@ return {
   end
 }
 "#;
-    let plugin = LuaPlugin::from_str(script).expect("load plugin");
+    let plugin = LuaPlugin::from_script(script).expect("load plugin");
     let err = plugin.call(()).expect_err("should fail");
     assert!(err.to_string().contains("unsupported Lua value function"));
 }

@@ -406,7 +406,7 @@ pub(super) struct StubEndpoint {
 
 #[cfg(test)]
 impl StubEndpoint {
-    pub(super) fn new(
+    pub(super) fn with_prefix(
         prefix: &str,
     ) -> (
         TranslationEndpoint,

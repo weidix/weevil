@@ -57,20 +57,20 @@ pub(crate) async fn run_file_mode_group(
     let input_path = path_to_string(&group.primary_path)?;
 
     let task = TaskContext::new("file");
-    let source_output = source_runner::run_file_scripts(
-        &task.id,
-        task.kind,
-        params.scripts(),
-        params.multi_source(),
-        params.multi_source_max_sources(),
-        params.source_priority(),
-        params.node_value_mapper(),
-        params.movie_translator(),
-        input_name.as_str(),
-        input_path.as_str(),
+    let run_config = source_runner::ScriptRunConfig {
+        task_id: &task.id,
+        task_kind: task.kind,
+        scripts: params.scripts(),
+        multi_source: params.multi_source(),
+        multi_source_max_sources: params.multi_source_max_sources(),
+        source_priority: params.source_priority(),
+        mapper: params.node_value_mapper(),
+        translator: params.movie_translator(),
         script_throttle,
-    )
-    .await?;
+    };
+    let source_output =
+        source_runner::run_file_scripts(&run_config, input_name.as_str(), input_path.as_str())
+            .await?;
     let mut movie = source_output.movie;
 
     let output_paths = format_output_paths(params.output_template(), &movie, &group.input_stem)?;

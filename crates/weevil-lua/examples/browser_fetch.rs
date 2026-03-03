@@ -18,7 +18,7 @@ return {
 }
 "#;
 
-    let plugin = LuaPlugin::from_str(script)?;
+    let plugin = LuaPlugin::from_script(script)?;
     let output = plugin.call_async(()).await?;
     match output {
         Some(Value::String(text)) => println!("{}", text.to_str()?),

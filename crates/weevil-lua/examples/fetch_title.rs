@@ -14,7 +14,7 @@ return {
   end
 }
 "#;
-    let plugin = LuaPlugin::from_str(script)?;
+    let plugin = LuaPlugin::from_script(script)?;
     let result = plugin.call(())?;
     match result {
         Some(value) => {

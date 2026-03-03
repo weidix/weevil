@@ -70,7 +70,7 @@ impl TrustedUrl {
         } else {
             url.path().to_string()
         };
-        let path_has_wildcard = path_pattern.as_bytes().iter().any(|ch| *ch == b'*');
+        let path_has_wildcard = path_pattern.as_bytes().contains(&b'*');
         Ok(Self {
             original: input.to_string(),
             scheme: url.scheme().to_string(),
@@ -137,9 +137,7 @@ fn parse_trusted_url(input: &str, wildcard_host: Option<&str>) -> Result<Url, Lu
             value: input.to_string(),
         });
     };
-    let authority_end = rest
-        .find(|ch| ch == '/' || ch == '?' || ch == '#')
-        .unwrap_or(rest.len());
+    let authority_end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
     let authority = &rest[..authority_end];
     if !authority.starts_with("*.") || authority.contains('@') {
         return Err(LuaPluginError::InvalidTrustedUrl {
@@ -158,9 +156,7 @@ fn parse_trusted_url(input: &str, wildcard_host: Option<&str>) -> Result<Url, Lu
 
 fn trusted_host_wildcard(input: &str) -> Option<&str> {
     let (_, rest) = input.split_once("://")?;
-    let authority_end = rest
-        .find(|ch| ch == '/' || ch == '?' || ch == '#')
-        .unwrap_or(rest.len());
+    let authority_end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
     let authority = &rest[..authority_end];
     authority.strip_prefix("*.")
 }

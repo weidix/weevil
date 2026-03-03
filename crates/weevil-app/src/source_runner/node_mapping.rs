@@ -361,18 +361,10 @@ fn find_actor_by_name_mut<'a>(
     actors: &'a mut [Actor],
     name: Option<&str>,
 ) -> Option<&'a mut Actor> {
-    let incoming = normalize_optional_key(name);
-    let Some(incoming_name) = incoming else {
-        return None;
-    };
-
-    for actor in actors {
-        if normalize_optional_key(actor.name.as_deref()) == Some(incoming_name.clone()) {
-            return Some(actor);
-        }
-    }
-
-    None
+    let incoming_name = normalize_optional_key(name)?;
+    actors.iter_mut().find(|actor| {
+        normalize_optional_key(actor.name.as_deref()).as_deref() == Some(incoming_name.as_str())
+    })
 }
 
 fn merge_actor(target: &mut Actor, incoming: Actor) {

@@ -63,10 +63,8 @@ pub(crate) fn resolve_translation_config(
 
     let endpoint = if let Some(value) = mode.and_then(|config| config.endpoints.as_ref()) {
         Some(value.clone())
-    } else if let Some(value) = shared.and_then(|config| config.endpoints.as_ref()) {
-        Some(value.clone())
     } else {
-        None
+        shared.and_then(|config| config.endpoints.as_ref()).cloned()
     };
 
     let (keys, unknown_keys) = parse_translation_keys(keys);

@@ -176,7 +176,7 @@ impl MovieTranslator {
         Ok(true)
     }
 
-    async fn translate_list_values(&self, values: &mut Vec<String>) -> Result<bool, AppError> {
+    async fn translate_list_values(&self, values: &mut [String]) -> Result<bool, AppError> {
         if values.is_empty() {
             return Ok(false);
         }

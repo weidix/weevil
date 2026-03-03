@@ -80,7 +80,6 @@ async fn run_serial(
 ) -> Vec<FetchTaskResult> {
     let execute = |inputs: &[PathBuf]| {
         let inputs = inputs.to_vec();
-        let script_throttle = script_throttle;
         async move {
             file_mode::run_file_mode_inputs(&inputs, params, script_throttle)
                 .await
@@ -164,11 +163,9 @@ where
                 }
                 results.push(result);
                 pending -= 1;
-                if !stop_spawning {
-                    if let Some(group) = iter.next() {
-                        spawn_task(&mut join_set, Arc::clone(&execute), group);
-                        pending += 1;
-                    }
+                if !stop_spawning && let Some(group) = iter.next() {
+                    spawn_task(&mut join_set, Arc::clone(&execute), group);
+                    pending += 1;
                 }
             }
             Some(Err(err)) => {

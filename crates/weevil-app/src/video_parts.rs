@@ -280,9 +280,7 @@ fn normalize_group_key(base: &str) -> String {
 }
 
 fn parent_dir(path: &Path) -> PathBuf {
-    path.parent()
-        .map(Path::to_path_buf)
-        .unwrap_or_else(PathBuf::new)
+    path.parent().map(Path::to_path_buf).unwrap_or_default()
 }
 
 fn dedupe_paths(paths: &[PathBuf]) -> Vec<PathBuf> {

@@ -49,10 +49,7 @@ fn parse_lang(raw: &str) -> Option<Lang> {
         return Some(lang);
     }
 
-    let base = normalized
-        .split(|value| value == '-' || value == '_')
-        .next()
-        .unwrap_or_default();
+    let base = normalized.split(['-', '_']).next().unwrap_or_default();
     if let Some(lang) = Lang::from_code(base) {
         return Some(lang);
     }
