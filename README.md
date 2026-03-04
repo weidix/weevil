@@ -39,6 +39,7 @@ cargo run -p weevil-app -- watch --input ./incoming --script ./scripts/source.lu
 ## Quick Start (Docker)
 
 The official image is published to GHCR and defaults to `watch` mode.
+Default config path inside container is `/app/weevil.toml`.
 
 ```bash
 docker run --rm ghcr.io/weidix/weevil:v1.0.0 --help

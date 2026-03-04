@@ -48,7 +48,8 @@ COPY --from=builder /out/weevil /usr/local/bin/weevil
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 
 ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+WORKDIR /app
 USER 65532:65532
 
 ENTRYPOINT ["/usr/local/bin/weevil"]
-CMD ["watch"]
+CMD ["--config", "/app/weevil.toml", "watch"]
