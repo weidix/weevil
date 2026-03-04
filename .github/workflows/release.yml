@@ -148,7 +148,10 @@ jobs:
         with:
           files: |
             release-assets/*
-          generate_release_notes: true
+          body: |
+            **Full Changelog**: https://github.com/${{ github.repository }}/commits/${{ github.ref_name }}
+          generate_release_notes: false
+          append_body: false
 
   publish-image:
     name: Publish Docker Image
