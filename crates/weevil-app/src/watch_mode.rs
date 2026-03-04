@@ -36,6 +36,14 @@ impl PendingFile {
         }
     }
 
+    fn startup_scan(len: u64, now: Instant) -> Self {
+        Self {
+            last_len: len,
+            last_change_at: now.checked_sub(STABLE_WINDOW).unwrap_or(now),
+            next_retry_at: now,
+        }
+    }
+
     fn mark_changed(&mut self, len: u64, now: Instant) {
         self.last_len = len;
         self.last_change_at = now;
@@ -49,12 +57,22 @@ pub(crate) async fn run_watch_mode(
     max_depth: i32,
 ) -> Result<(), AppError> {
     fetch_runtime::preflight_script(fetch, params.scripts()).await?;
+    info!(
+        target: "weevil.app",
+        input = %input.display(),
+        max_depth,
+        scripts = ?params.scripts(),
+        "watch mode initializing"
+    );
 
-    let mut seen = dir_mode::scan_video_files(input, max_depth)
-        .await?
-        .into_iter()
-        .collect::<HashSet<_>>();
+    let mut seen = HashSet::new();
     let mut pending: HashMap<PathBuf, PendingFile> = HashMap::new();
+    let startup_files = dir_mode::scan_video_files(input, max_depth).await?;
+    enqueue_startup_scan_files(startup_files, &mut pending).await?;
+    info!(
+        "watch startup scan queued {} existing video file(s)",
+        pending.len()
+    );
 
     let (sender, mut receiver) = mpsc::unbounded_channel();
     let mut watcher = notify::recommended_watcher(move |result| {
@@ -66,7 +84,10 @@ pub(crate) async fn run_watch_mode(
         .watch(input, RecursiveMode::Recursive)
         .map_err(|err| watch_start_error(input, err))?;
 
-    info!("watch mode started with notify backend: {:?}", input);
+    info!(
+        "watch mode started listening with notify backend: {:?}",
+        input
+    );
 
     let mut ticker = interval(CHECK_TICK);
 
@@ -102,6 +123,31 @@ async fn retain_existing_paths(seen: &mut HashSet<PathBuf>) {
             seen.remove(&path);
         }
     }
+}
+
+async fn enqueue_startup_scan_files(
+    paths: Vec<PathBuf>,
+    pending: &mut HashMap<PathBuf, PendingFile>,
+) -> Result<(), AppError> {
+    let now = Instant::now();
+    for path in paths {
+        let metadata = match fs::metadata(&path).await {
+            Ok(metadata) => metadata,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(err) => {
+                return Err(AppError::InputMetadata {
+                    path: path.clone(),
+                    source: err,
+                });
+            }
+        };
+        if !metadata.is_file() {
+            continue;
+        }
+        pending.insert(path, PendingFile::startup_scan(metadata.len(), now));
+    }
+
+    Ok(())
 }
 
 async fn retain_existing_pending(pending: &mut HashMap<PathBuf, PendingFile>) {

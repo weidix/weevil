@@ -83,3 +83,19 @@ async fn group_ready_files_merges_sibling_split_parts() {
     assert_eq!(groups.len(), 1);
     assert_eq!(groups[0], vec![first, second]);
 }
+
+#[tokio::test]
+async fn enqueue_startup_scan_files_are_ready_without_waiting_stable_window() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let file = dir.path().join("Movie.mkv");
+    touch(&file).await;
+
+    let mut pending = std::collections::HashMap::new();
+    enqueue_startup_scan_files(vec![file.clone()], &mut pending)
+        .await
+        .expect("enqueue startup files");
+
+    let seen = std::collections::HashSet::new();
+    let ready = collect_ready_files(&seen, &mut pending).await;
+    assert_eq!(ready, vec![file]);
+}

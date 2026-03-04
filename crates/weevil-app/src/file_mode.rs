@@ -7,6 +7,7 @@ use crate::source_runner;
 use crate::video_parts::{self, VideoInputGroup};
 use std::path::PathBuf;
 use tokio::fs;
+use tracing::info;
 
 mod fs_ops;
 mod input_name;
@@ -57,6 +58,14 @@ pub(crate) async fn run_file_mode_group(
     let input_path = path_to_string(&group.primary_path)?;
 
     let task = TaskContext::new("file");
+    info!(
+        target: "weevil.app",
+        task_id = %task.id,
+        task_kind = task.kind,
+        input = %input_path,
+        scripts = ?params.scripts(),
+        "running scripts for input group"
+    );
     let run_config = source_runner::ScriptRunConfig {
         task_id: &task.id,
         task_kind: task.kind,
@@ -71,6 +80,13 @@ pub(crate) async fn run_file_mode_group(
     let source_output =
         source_runner::run_file_scripts(&run_config, input_name.as_str(), input_path.as_str())
             .await?;
+    info!(
+        target: "weevil.app",
+        task_id = %task.id,
+        task_kind = task.kind,
+        input = %input_path,
+        "scripts completed for input group"
+    );
     let mut movie = source_output.movie;
 
     let output_paths = format_output_paths(params.output_template(), &movie, &group.input_stem)?;
