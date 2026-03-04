@@ -5,6 +5,16 @@ All notable changes to this project are documented in this file.
 The format is based on Keep a Changelog,
 and this project follows Semantic Versioning.
 
+## [1.0.1] - 2026-03-04
+
+### Added
+- `watch` mode now performs an initial directory scan on startup and enqueues discovered video files for processing before continuous event listening.
+- Added runtime logging around file-group execution so active script paths are visible when processing starts.
+
+### Changed
+- Improved watch-mode startup logs to include initialization context and queued-file count.
+- Switched console logging formatter to compact structured output with level/target visibility and ANSI color support when output is attached to a terminal.
+
 ## [1.0.0] - 2026-03-03
 
 This is the first stable release track.
